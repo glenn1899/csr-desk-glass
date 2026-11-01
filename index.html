@@ -45,7 +45,7 @@
   .rail .win { display: flex; align-items: center; gap: .35rem; font-size: 11px; letter-spacing: .04em; }
   .rail .dot { width: .375rem; height: .375rem; border-radius: 999px; background: #007aff; }
   .rail .name { display: block; margin-top: .125rem; font-size: 13px; font-weight: 500; }
-  .clock-col { width: 9rem; justify-self: center; }
+  .clock-col { width: 10.5rem; justify-self: center; }
   .clock { display: block; width: 100%; height: auto; overflow: visible; filter: drop-shadow(0 16px 30px rgba(40,60,100,.16)); }
   .date { margin: .5rem 0 0; text-align: center; font-size: 13px; color: #86868b; white-space: nowrap; }
   .card { min-width: 0; overflow: hidden; border-radius: 28px; }
@@ -159,29 +159,25 @@
     <div class="clock-col">
       <div id="face" role="img" aria-label="Eastern time">
         <svg class="clock" viewBox="0 0 200 200" aria-hidden="true">
-          <defs>
-            <linearGradient id="rim" x1="20%" y1="0%" x2="80%" y2="100%">
-              <stop offset="0%" stop-color="#fff" stop-opacity=".95"/>
-              <stop offset="45%" stop-color="#d7e4f2" stop-opacity=".55"/>
-              <stop offset="100%" stop-color="#fff" stop-opacity=".85"/>
-            </linearGradient>
-          </defs>
-          <circle cx="100" cy="100" r="97" fill="url(#rim)"/>
-          <circle cx="100" cy="100" r="88" fill="rgba(255,255,255,.72)"/>
-          <circle cx="100" cy="100" r="88" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <g transform="translate(100 100)" stroke="#1d1d1f" stroke-linecap="round" opacity=".55" id="ticks"></g>
-          <g fill="#1d1d1f" font-size="16" font-weight="600" font-family="-apple-system, BlinkMacSystemFont, sans-serif">
-            <text x="100" y="36" text-anchor="middle" dominant-baseline="central">12</text>
-            <text x="164" y="104" text-anchor="middle" dominant-baseline="central">3</text>
-            <text x="100" y="172" text-anchor="middle" dominant-baseline="central">6</text>
-            <text x="36" y="104" text-anchor="middle" dominant-baseline="central">9</text>
-          </g>
+          <circle cx="100" cy="100" r="98" fill="rgba(255,255,255,.45)"/>
+          <circle cx="100" cy="100" r="92" fill="#f7f7f5"/>
+          <circle cx="100" cy="100" r="92" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="1.25"/>
+          <circle cx="100" cy="100" r="86" fill="none" stroke="rgba(29,29,31,.08)" stroke-width="1"/>
+          <g transform="translate(100 100)" stroke="#1d1d1f" id="ticks"></g>
+          <g id="nums" fill="#1d1d1f" font-size="13" font-weight="500" font-family="-apple-system, BlinkMacSystemFont, sans-serif"></g>
           <g transform="translate(100 100)">
-            <g id="hour"><line y1="8" y2="-46" stroke="#1d1d1f" stroke-width="3.5" stroke-linecap="round"/></g>
-            <g id="minute"><line y1="10" y2="-64" stroke="#1d1d1f" stroke-width="2.25" stroke-linecap="round"/></g>
-            <g id="second"><line y1="18" y2="-70" stroke="#ff3b30" stroke-width="1" stroke-linecap="round"/></g>
+            <g id="hour">
+              <line y1="10" y2="-34" stroke="#1c1c1e" stroke-width="3.4" stroke-linecap="square"/>
+              <line y1="-34" y2="-44" stroke="#c5d7b4" stroke-width="3.4" stroke-linecap="square"/>
+            </g>
+            <g id="minute">
+              <line y1="14" y2="-56" stroke="#1c1c1e" stroke-width="2.15" stroke-linecap="square"/>
+              <line y1="-56" y2="-68" stroke="#c5d7b4" stroke-width="2.15" stroke-linecap="square"/>
+            </g>
+            <g id="second"><line y1="24" y2="-74" stroke="#e2b100" stroke-width="1.35"/></g>
+            <circle r="5.5" fill="#e2b100"/>
+            <circle r="1.7" fill="#1c1c1e"/>
           </g>
-          <circle cx="100" cy="100" r="3" fill="#1d1d1f"/>
         </svg>
       </div>
       <p class="date" id="date">Eastern</p>
@@ -454,11 +450,25 @@
     }
   }
   var ticks = document.getElementById("ticks");
-  for (var n = 0; n < 12; n++) if (n % 3) {
+  for (var n = 0; n < 60; n++) {
     var line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("y1", "-78"); line.setAttribute("y2", "-72"); line.setAttribute("stroke-width", "1.25");
-    line.setAttribute("transform", "rotate(" + (n * 30) + ")");
+    var major = n % 5 === 0;
+    line.setAttribute("y1", major ? "-78" : "-80");
+    line.setAttribute("y2", "-84");
+    line.setAttribute("stroke-width", major ? "1.35" : "0.7");
+    line.setAttribute("transform", "rotate(" + (n * 6) + ")");
     ticks.appendChild(line);
+  }
+  var nums = document.getElementById("nums");
+  for (var h = 1; h <= 12; h++) {
+    var ang = ((h % 12) * 30 - 90) * Math.PI / 180;
+    var text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", String(100 + 64 * Math.cos(ang)));
+    text.setAttribute("y", String(100 + 64 * Math.sin(ang)));
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "central");
+    text.textContent = String(h);
+    nums.appendChild(text);
   }
   var hourEl = document.getElementById("hour");
   var minuteEl = document.getElementById("minute");
