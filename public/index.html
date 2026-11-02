@@ -48,8 +48,6 @@
   .clock-col { width: 10.5rem; justify-self: center; }
   .clock { display: block; width: 100%; height: auto; overflow: visible; filter: drop-shadow(0 16px 30px rgba(40,60,100,.16)); }
   .card { min-width: 0; overflow: hidden; border-radius: 28px; }
-  .meter { height: .375rem; background: rgba(0,0,0,.05); }
-  .meter > span { display: block; height: 100%; background: #007aff; }
   .pad { padding: 1.75rem 1.5rem; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
   .pill {
@@ -58,8 +56,10 @@
     background: rgba(255,255,255,.55); box-shadow: inset 0 1px 0 #fff;
   }
   .now-kicker { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #007aff; }
-  .left { font-size: .875rem; font-weight: 500; font-variant-numeric: tabular-nums; color: #3a3a3c; }
-  .left.urgent { color: #ff3b30; }
+  .hours { display: flex; align-items: center; gap: .3rem; min-height: 1.35rem; }
+  .hour { display: block; flex: 0 0 auto; height: auto; }
+  .hour svg { display: block; width: 100%; height: auto; }
+  .hour svg .arc { transition: stroke-dashoffset .9s linear; }
   h2.title { margin: 1rem 0 0; font-size: 2.5rem; line-height: 1; font-weight: 600; letter-spacing: -.035em; }
   .window { margin-top: 1rem; font-size: 15px; font-weight: 500; color: #3a3a3c; font-variant-numeric: tabular-nums; }
   .manager { margin: .75rem 0 0; font-size: 12px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: #007aff; }
@@ -304,18 +304,69 @@
     return { kind:"closed", block:null, next:null, later:true, monday:false };
   }
   function until(min, c) { return (min - c.minutes) * 60 - c.seconds; }
+  /* hour-circles */
+  function blockSpanMinutes(block) {
+    var origin = block.from == null ? block.start : block.from;
+    return Math.max(0, block.end - origin);
+  }
+  function hourCircles(lengthMinutes, remainingSeconds) {
+    var spanMin = Math.max(0, Number(lengthMinutes) || 0);
+    var fullHours = Math.floor(spanMin / 60);
+    var restMin = spanMin - fullHours * 60;
+    var pieces = [];
+    var i;
+    for (i = 0; i < fullHours; i++) pieces.push({ size: 1, seconds: 3600 });
+    if (restMin > 0) pieces.push({ size: restMin / 60, seconds: restMin * 60 });
+    var spanSec = 0;
+    for (i = 0; i < pieces.length; i++) spanSec += pieces[i].seconds;
+    var left = Math.max(0, Number(remainingSeconds) || 0);
+    if (left > spanSec) left = spanSec;
+    var consumed = spanSec - left;
+    var cursor = 0;
+    return pieces.map(function (piece) {
+      var start = cursor;
+      var end = cursor + piece.seconds;
+      cursor = end;
+      var fill = consumed <= start ? 1 : consumed >= end ? 0 : (end - consumed) / (end - start);
+      return { size: piece.size, fill: fill };
+    });
+  }
+  /* hour-circles-end */
+  function leftLabel(seconds) {
+    return seconds <= 0 ? "Ending" : spanText(seconds) + " left";
+  }
+  function ringSvg(fill) {
+    var circ = 2 * Math.PI * 12;
+    var shown = Math.max(0, Math.min(1, fill));
+    var offset = (circ * (1 - shown)).toFixed(3);
+    return '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="rgba(0,0,0,.1)" stroke-width="3.25"/>' +
+      '<circle class="arc" cx="16" cy="16" r="12" fill="none" stroke="#007aff" stroke-width="3.25" stroke-linecap="butt" stroke-dasharray="' + circ.toFixed(3) + '" stroke-dashoffset="' + offset + '" transform="rotate(-90 16 16)"' + (shown <= 0 ? ' stroke-opacity="0"' : "") + "/></svg>";
+  }
+  function hourMarksHtml(block, seconds) {
+    var marks = hourCircles(blockSpanMinutes(block), Math.max(0, seconds));
+    var dots = marks.map(function (mark) {
+      return '<span class="hour" style="width:' + (1.15 * mark.size).toFixed(3) + 'rem">' + ringSvg(mark.fill) + "</span>";
+    }).join("");
+    return '<div class="hours" id="hours" role="img" aria-label="' + esc(leftLabel(seconds)) + '">' + dots + "</div>";
+  }
+  function paintHours(block, seconds) {
+    var hours = document.getElementById("hours");
+    if (!hours) return;
+    hours.setAttribute("aria-label", leftLabel(seconds));
+    var marks = hourCircles(blockSpanMinutes(block), Math.max(0, seconds));
+    var arcs = hours.querySelectorAll(".arc");
+    var circ = 2 * Math.PI * 12;
+    for (var i = 0; i < arcs.length && i < marks.length; i++) {
+      var shown = Math.max(0, Math.min(1, marks[i].fill));
+      arcs[i].setAttribute("stroke-dashoffset", (circ * (1 - shown)).toFixed(3));
+      arcs[i].setAttribute("stroke-opacity", shown <= 0 ? "0" : "1");
+    }
+  }
   function spanText(total) {
     var sec = Math.max(0, total), h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
     if (sec < 15 * 60) return m + "m " + (s < 10 ? "0" : "") + s + "s";
     if (h > 0) return m > 0 ? h + "h " + m + "m" : h + "h";
     return m + "m";
-  }
-  function progress(block, c) {
-    var origin = block.from == null ? block.start : block.from;
-    if (c.minutes < origin) return 0;
-    var span = (block.end - origin) * 60;
-    if (span <= 0) return 1;
-    return Math.max(0, Math.min(1, ((c.minutes - origin) * 60 + c.seconds) / span));
   }
   function waitSpan(next) {
     var i = BLOCKS.indexOf(next), prev = i > 0 ? BLOCKS[i - 1] : null;
@@ -368,15 +419,13 @@
       return '<section class="hero glass"><div class="tick"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#fff" stroke-width="2.5"><path d="M5 12.5 9.5 17 19 7"/></svg></div><h2>Done</h2><p>No blocks left today.</p><p class="exit"><b style="color:#1d1d1f">Exit check. </b>' + esc(EXIT) + "</p></section>";
     }
     var left = c.preview ? null : until(block.end, c.clock);
-    var urgent = left != null && left < 15 * 60;
     var tasks = block.tasks.filter(function (t) { return t.tag !== "note" && (!t.monday || f.monday); });
     var done = tasks.filter(function (t) { return checks.indexOf(t.id) >= 0; }).length;
     var phone = block.phone ? '<div class="phone glass' + (phoneOn(block.phone.mode) ? " on" : "") + '">' + '<span class="well">' + phoneSvg(block.phone.mode) + "</span><div><p class=\"k\">Phone</p><p class=\"v\">" + esc(block.phone.label) + "</p></div></div>" : "";
     var rows = block.tasks.map(function (t) { return taskHtml({ monday: !!t.monday, due: t.due, id: t.id, tag: t.tag, text: t.text }, { monday: f.monday, clock: c.clock }, !c.preview, true); }).join("");
     return '<section class="card glass">' +
-      (c.preview ? "" : '<div class="meter"><span id="meter" style="width:' + (progress(block, c.clock) * 100) + '%"></span></div>') +
       '<div class="pad"><div class="row"><p class="pill now-kicker">' + (c.preview ? "Preview" : "Now") + "</p>" +
-      (left == null ? "" : '<p class="pill left' + (urgent ? " urgent" : "") + '" id="left">' + (left <= 0 ? "Ending" : spanText(left) + " left") + "</p>") +
+      (left == null ? "" : hourMarksHtml(block, left)) +
       "</div><h2 class=\"title\">" + esc(block.title) + "</h2>" +
       '<p class="pill window">' + esc(block.window) + "</p>" +
       (block.manager ? '<p class="manager">Manager</p>' : "") +
@@ -468,14 +517,7 @@
       sig = nextSig;
       paintStructure({ clock: clock, focus: focus, preview: preview });
     } else if (focus.block && !preview) {
-      var meter = document.getElementById("meter");
-      if (meter) meter.style.width = (progress(focus.block, clock) * 100) + "%";
-      var left = document.getElementById("left");
-      if (left) {
-        var sec = until(focus.block.end, clock);
-        left.textContent = sec <= 0 ? "Ending" : spanText(sec) + " left";
-        left.className = "pill left" + (sec < 15 * 60 ? " urgent" : "");
-      }
+      paintHours(focus.block, until(focus.block.end, clock));
       if (focus.next && !focus.later) {
         var remain = Math.max(0, until(focus.next.start, clock));
         var bar = document.getElementById("remain");
