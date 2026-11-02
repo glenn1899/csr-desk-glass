@@ -55,6 +55,19 @@ export async function loadEvents(env, options = {}) {
         }),
       };
     }
+    const hasKv = sourceEnv.CAL_KV && typeof sourceEnv.CAL_KV.get === "function";
+    if (!hasKv && blank(sourceEnv.GOOGLE_REFRESH_TOKEN)) {
+      return {
+        status: 503,
+        body: envelope({
+          ok: false,
+          source: "google",
+          generatedAt,
+          error: "Calendar storage is not configured.",
+          events: [],
+        }),
+      };
+    }
     const refreshToken = await readRefreshToken(sourceEnv);
     if (!refreshToken) {
       return {

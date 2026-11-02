@@ -1,4 +1,5 @@
 const JWT_HEADER = "Cf-Access-Jwt-Assertion";
+const DEFAULT_ALLOWED_EMAIL = "glenn@oibc.ca";
 const CERT_TTL_MS = 10 * 60 * 1000;
 const CLOCK_SKEW_SEC = 60;
 const MAX_TOKEN_LENGTH = 16_384;
@@ -48,10 +49,20 @@ export async function verifyAccessJwt(request, env, options = {}) {
     );
     const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
     const signature = base64UrlToBytes(parts[2]);
-    return crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, signed);
+    const signedOk = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, signed);
+    return signedOk && emailAllowed(payload, env);
   } catch {
     return false;
   }
+}
+
+function emailAllowed(payload, env) {
+  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  if (!email) return false;
+  const configured = env && env.ALLOWED_EMAIL != null && String(env.ALLOWED_EMAIL).trim()
+    ? String(env.ALLOWED_EMAIL).trim()
+    : DEFAULT_ALLOWED_EMAIL;
+  return email === configured.toLowerCase();
 }
 
 async function jwkForKid(team, kid, fetchImpl, nowMs) {

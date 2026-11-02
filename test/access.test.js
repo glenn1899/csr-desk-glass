@@ -56,7 +56,15 @@ async function sign(pair, payload, kid, headerExtra = {}) {
 
 function claims(overrides = {}) {
   const now = Math.floor(Date.now() / 1000);
-  return { iss: ISSUER, aud: AUD, exp: now + 3600, iat: now, marker: "TOKENMARKER", ...overrides };
+  return {
+    iss: ISSUER,
+    aud: AUD,
+    exp: now + 3600,
+    iat: now,
+    email: "glenn@oibc.ca",
+    marker: "TOKENMARKER",
+    ...overrides,
+  };
 }
 
 function certFetch(jwk, calls) {
@@ -131,7 +139,7 @@ test("calendar and connect routes require a valid Access JWT", async () => {
   const start = await handleRequest(new Request(`${SITE}/auth/start`, {
     headers: {
       "Cf-Access-Jwt-Assertion": token,
-      "Cf-Access-Authenticated-User-Email": "owner@example.com",
+      "Cf-Access-Authenticated-User-Email": "other@example.com",
     },
   }), env({
     GOOGLE_CLIENT_ID: "client-id",
@@ -140,4 +148,34 @@ test("calendar and connect routes require a valid Access JWT", async () => {
   assert.equal(start.status, 302);
   assert.equal(new URL(start.headers.get("location")).searchParams.get("scope"), "https://www.googleapis.com/auth/calendar.readonly");
   assert.equal(start.headers.get("location").includes("client-secret"), false);
+});
+
+test("only the email inside the verified token is allowed", async () => {
+  clearAccessCertCache();
+  const { pair, jwk } = await signingKey("key-email");
+  const fetchImpl = certFetch(jwk, []);
+  const settings = env();
+  const wrong = await sign(pair, claims({ email: "other@example.com" }), "key-email");
+  const missing = await sign(pair, claims({ email: undefined }), "key-email");
+  const spoofed = await handleRequest(new Request(`${SITE}/api/events`, {
+    headers: {
+      "Cf-Access-Jwt-Assertion": wrong,
+      "Cf-Access-Authenticated-User-Email": "glenn@oibc.ca",
+    },
+  }), settings, { fetchImpl });
+  assert.equal(spoofed.status, 401);
+  assert.equal(JSON.stringify(await spoofed.json()).includes("glenn@oibc.ca"), false);
+
+  const noEmail = await handleRequest(new Request(`${SITE}/auth/callback`, {
+    headers: {
+      "Cf-Access-Jwt-Assertion": missing,
+      "Cf-Access-Authenticated-User-Email": "glenn@oibc.ca",
+    },
+  }), settings, { fetchImpl });
+  assert.equal(noEmail.status, 401);
+
+  const headerOnly = await handleRequest(new Request(`${SITE}/auth/start`, {
+    headers: { "Cf-Access-Authenticated-User-Email": "glenn@oibc.ca" },
+  }), settings, { fetchImpl });
+  assert.equal(headerOnly.status, 401);
 });

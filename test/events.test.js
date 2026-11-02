@@ -29,6 +29,18 @@ test("a partial Google setup does not fall back to sample data", async () => {
   assert.match(result.body.error, /incomplete/);
 });
 
+test("Google settings without calendar storage say it is not configured", async () => {
+  const result = await loadEvents({
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    CALENDAR_ID: "primary",
+  }, { now: NOW });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.error, "Calendar storage is not configured.");
+  assert.equal(result.body.events.length, 0);
+  assert.equal(JSON.stringify(result.body).includes("client-secret"), false);
+});
+
 test("configured Google settings without a refresh token are not sample data", async () => {
   const result = await loadEvents({
     GOOGLE_CLIENT_ID: "client-id",

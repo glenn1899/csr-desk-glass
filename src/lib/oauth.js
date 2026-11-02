@@ -3,14 +3,11 @@ export const REFRESH_KEY = "google_refresh_token";
 export const ACCESS_KEY = "google_access_token";
 
 const STATE_COOKIE = "cal_oauth_state";
-const ACCESS_HEADER = "Cf-Access-Authenticated-User-Email";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
 export function handleStart(request, env) {
   if (request.method.toUpperCase() !== "GET") return methodNotAllowed();
-  const denied = requireAccess(request);
-  if (denied) return denied;
   if (blank(env.GOOGLE_CLIENT_ID) || blank(env.GOOGLE_CLIENT_SECRET)) {
     return jsonError("Google Calendar settings are incomplete.", 400);
   }
@@ -30,8 +27,6 @@ export function handleStart(request, env) {
 
 export async function handleCallback(request, env, fetchImpl = fetch) {
   if (request.method.toUpperCase() !== "GET") return methodNotAllowed();
-  const denied = requireAccess(request);
-  if (denied) return denied;
   const secure = new URL(request.url).protocol === "https:";
   const incoming = new URL(request.url);
   const state = incoming.searchParams.get("state") || "";
@@ -56,8 +51,8 @@ export async function handleCallback(request, env, fetchImpl = fetch) {
     console.log(JSON.stringify({ level: "error", message: "calendar_connect_failed" }));
     return redirect(doneUrl(request, "error"), [clear]);
   }
-  if (!tokens.refreshToken) {
-    console.log(JSON.stringify({ level: "error", message: "calendar_connect_missing_refresh" }));
+  if (!tokens.refreshToken || !scopeIsCalendarReadonly(tokens.scope)) {
+    console.log(JSON.stringify({ level: "error", message: "calendar_connect_rejected" }));
     return redirect(doneUrl(request, "error"), [clear]);
   }
   await env.CAL_KV.put(REFRESH_KEY, tokens.refreshToken);
@@ -129,7 +124,14 @@ async function exchangeCode(request, env, code, fetchImpl) {
   return {
     refreshToken: payload && payload.refresh_token ? String(payload.refresh_token) : "",
     accessToken: payload && payload.access_token ? String(payload.access_token) : "",
+    scope: payload && payload.scope ? String(payload.scope) : "",
   };
+}
+
+export function scopeIsCalendarReadonly(scope) {
+  if (typeof scope !== "string") return false;
+  const parts = scope.split(/\s+/).filter(Boolean);
+  return parts.length === 1 && parts[0] === CALENDAR_SCOPE;
 }
 
 async function requestAccessToken(env, refreshToken, fetchImpl) {
@@ -162,12 +164,6 @@ async function requestAccessToken(env, refreshToken, fetchImpl) {
     accessToken: String(payload.access_token),
     expiresIn: Number(payload.expires_in),
   };
-}
-
-function requireAccess(request) {
-  const email = request.headers.get(ACCESS_HEADER);
-  if (blank(email)) return jsonError("Cloudflare Access is required.", 401);
-  return null;
 }
 
 function callbackUrl(request) {
@@ -216,7 +212,11 @@ function readCookie(request, name) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
     if (part.slice(0, eq).trim() !== name) continue;
-    return decodeURIComponent(part.slice(eq + 1).trim());
+    try {
+      return decodeURIComponent(part.slice(eq + 1).trim());
+    } catch {
+      return "";
+    }
   }
   return "";
 }

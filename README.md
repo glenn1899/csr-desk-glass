@@ -27,7 +27,7 @@ Times are converted to Eastern time (America/Toronto). A successful `/api/events
 | `CAL_KV` | KV binding for the namespace `csr-desk-glass-cal` |
 | `GOOGLE_REFRESH_TOKEN` | Optional secret. Used only when `CAL_KV` has no refresh token |
 
-5. Cloudflare Access already protects this Worker for the team `dry-mud-91ba.cloudflareaccess.com`. The policy has to keep covering the page, `/api/*`, and `/auth/*`. `/auth/*` still refuses a visitor Access has not identified. `/api/events` and `/auth/*` also check the Access JWT (`Cf-Access-Jwt-Assertion`) against that team’s certificates and this application’s audience. A copied email header is not enough.
+5. Cloudflare Access already protects this Worker for the team `dry-mud-91ba.cloudflareaccess.com`. The policy has to keep covering the page, `/api/*`, and `/auth/*`. `/api/events` and `/auth/*` check the Access login token against that team’s certificates and this application’s audience, then allow only the email in `ALLOWED_EMAIL` (glenn@oibc.ca). A copied email header is not enough, and a token with no email is refused. Preview builds do not receive the production `CAL_KV` binding. On a preview, connecting the calendar returns “Calendar storage is not configured.”
 6. While signed in through Access, open `https://csr-desk-glass.glenn-889.workers.dev/auth/start` once. Google asks for offline read-only access. After you agree, the site saves the refresh token in `CAL_KV` and sends you back to the desk. The token is not shown.
 
 The Worker script routes `/api/events`, `/auth/start`, and `/auth/callback`. Every other request, including the desk page, is served from the `public` folder through the `ASSETS` binding.
