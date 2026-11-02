@@ -4,20 +4,22 @@ import worker from "../src/index.js";
 
 const SITE = "https://csr-desk-glass.glenn-889.workers.dev";
 
-test("the worker routes the calendar API and the connect paths", async () => {
-  const events = await worker.fetch(new Request(`${SITE}/api/events`), {});
-  assert.equal(events.status, 200);
-  assert.equal(events.headers.get("cache-control"), "private, max-age=30");
-  const body = await events.json();
-  assert.equal(body.source, "sample");
-  assert.equal(body.ok, true);
+test("the worker refuses calendar and connect routes without an Access JWT", async () => {
+  const events = await worker.fetch(new Request(`${SITE}/api/events`), {
+    ACCESS_TEAM_DOMAIN: "dry-mud-91ba.cloudflareaccess.com",
+    ACCESS_AUD: "f3e04809e143ccb2737c5becfe83dd36c5852415051eb808ff95e638974bdec5",
+  });
+  assert.equal(events.status, 401);
+  assert.equal(events.headers.get("cache-control"), "private, no-store");
+  assert.equal((await events.json()).error, "Cloudflare Access is required.");
 
   const start = await worker.fetch(new Request(`${SITE}/auth/start`), {
     GOOGLE_CLIENT_ID: "client-id",
     GOOGLE_CLIENT_SECRET: "client-secret",
+    ACCESS_TEAM_DOMAIN: "dry-mud-91ba.cloudflareaccess.com",
+    ACCESS_AUD: "f3e04809e143ccb2737c5becfe83dd36c5852415051eb808ff95e638974bdec5",
   });
   assert.equal(start.status, 401);
-  assert.equal((await start.json()).error, "Cloudflare Access is required.");
 
   const callback = await worker.fetch(new Request(`${SITE}/auth/callback?code=x&state=y`), {});
   assert.equal(callback.status, 401);

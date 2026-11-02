@@ -17,12 +17,15 @@
     // The Worker routes /api and /auth, then serves index.html through ASSETS.
     "run_worker_first": true
   },
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "dry-mud-91ba.cloudflareaccess.com",
+    "ACCESS_AUD": "f3e04809e143ccb2737c5becfe83dd36c5852415051eb808ff95e638974bdec5"
+  },
   "kv_namespaces": [
     {
       "binding": "CAL_KV",
       // Namespace name: csr-desk-glass-cal.
-      // Replace this placeholder with that namespace's id before any deploy.
-      "id": "PLACEHOLDER_csr-desk-glass-cal"
+      "id": "27f2ee8d076b4394a7eb1a3554deeb89"
     }
   ]
 }

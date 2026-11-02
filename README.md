@@ -17,7 +17,7 @@ Times are converted to Eastern time (America/Toronto). A successful `/api/events
 1. In Google Cloud, create a project and enable the Google Calendar API.
 2. On the OAuth consent screen, choose External (or Internal if this is a Workspace account) and set the publishing status to **Testing**. Add the owner as a test user. The app only needs the read-only calendar scope.
 3. Create an OAuth client of type **Web application**. Under authorized redirect URIs, add exactly `https://csr-desk-glass.glenn-889.workers.dev/auth/callback`.
-4. This site is the Cloudflare Worker named `csr-desk-glass`, not a Pages project. In that Worker’s settings, add these names. Use an encrypted secret for the client secret and for a refresh token if you set one by hand. `wrangler.jsonc` already declares the `CAL_KV` binding. Its id is a placeholder. Before any deploy, replace `PLACEHOLDER_csr-desk-glass-cal` with the id of the KV namespace named `csr-desk-glass-cal`.
+4. This site is the Cloudflare Worker named `csr-desk-glass`, not a Pages project. `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `CALENDAR_ID` are already set on that Worker. Use an encrypted secret only if you also set `GOOGLE_REFRESH_TOKEN` by hand. `wrangler.jsonc` binds `CAL_KV` to the namespace `csr-desk-glass-cal`.
 
 | Name | What it is |
 | --- | --- |
@@ -27,7 +27,7 @@ Times are converted to Eastern time (America/Toronto). A successful `/api/events
 | `CAL_KV` | KV binding for the namespace `csr-desk-glass-cal` |
 | `GOOGLE_REFRESH_TOKEN` | Optional secret. Used only when `CAL_KV` has no refresh token |
 
-5. Turn on Cloudflare Access so only the owner’s email can open the site. The policy has to cover the page, `/api/*`, and `/auth/*`. The connect routes also refuse to run unless Access has identified the visitor.
+5. Cloudflare Access already protects this Worker for the team `dry-mud-91ba.cloudflareaccess.com`. The policy has to keep covering the page, `/api/*`, and `/auth/*`. `/auth/*` still refuses a visitor Access has not identified. `/api/events` and `/auth/*` also check the Access JWT (`Cf-Access-Jwt-Assertion`) against that team’s certificates and this application’s audience. A copied email header is not enough.
 6. While signed in through Access, open `https://csr-desk-glass.glenn-889.workers.dev/auth/start` once. Google asks for offline read-only access. After you agree, the site saves the refresh token in `CAL_KV` and sends you back to the desk. The token is not shown.
 
 The Worker script routes `/api/events`, `/auth/start`, and `/auth/callback`. Every other request, including the desk page, is served from the `public` folder through the `ASSETS` binding.
