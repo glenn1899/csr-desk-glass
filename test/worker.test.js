@@ -25,20 +25,16 @@ test("the worker refuses calendar and connect routes without an Access JWT", asy
   assert.equal(callback.status, 401);
 });
 
-test("the worker serves the desk page through the assets binding", async () => {
-  let seen = "";
-  const response = await worker.fetch(new Request(`${SITE}/`), {
-    ASSETS: {
-      fetch(request) {
-        seen = request instanceof Request ? request.url : String(request);
-        return new Response("<!doctype html><title>CSR Desk</title>", {
-          status: 200,
-          headers: { "content-type": "text/html; charset=utf-8" },
-        });
-      },
-    },
-  });
-  assert.equal(response.status, 200);
-  assert.match(await response.text(), /CSR Desk/);
-  assert.equal(seen, `${SITE}/`);
+test("the worker serves the bundled desk page", async () => {
+  const page = await worker.fetch(new Request(`${SITE}/`), {});
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-type"), /^text\/html/);
+  assert.match(await page.text(), /<title>CSR Desk<\/title>/);
+
+  const named = await worker.fetch(new Request(`${SITE}/index.html`), {});
+  assert.equal(named.status, 200);
+  assert.match(named.headers.get("content-type"), /^text\/html/);
+
+  const missing = await worker.fetch(new Request(`${SITE}/missing`), {});
+  assert.equal(missing.status, 404);
 });
