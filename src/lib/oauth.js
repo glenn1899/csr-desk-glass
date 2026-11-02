@@ -14,6 +14,7 @@ const TOKEN_ERROR_CODES = new Set([
   "invalid_scope",
   "redirect_uri_mismatch",
   "access_denied",
+  "fetch_failed",
 ]);
 
 export function handleStart(request, env) {
@@ -61,8 +62,10 @@ export async function handleCallback(request, env, fetchImpl = fetch) {
     const status = err && Number.isInteger(err.status) ? err.status : 0;
     const code = safeErrorCode(err && err.code);
     const line = { level: "error", message: "calendar_connect_failed" };
-    if (status >= 400 && status <= 599) line.status = status;
+    if (status >= 300 && status <= 599) line.status = status;
     if (code) line.error = code;
+    const name = safeCauseName(err && err.causeName);
+    if (code === "fetch_failed" && name) line.name = name;
     console.log(JSON.stringify(line));
     return redirect(doneUrl(request, "error", code), [clear]);
   }
@@ -116,8 +119,7 @@ async function exchangeCode(request, env, code, fetchImpl) {
   try {
     response = await fetchImpl(TOKEN_URL, {
       method: "POST",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
+      redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       // Same redirect_uri as /auth/start. Google rejects the exchange when they differ.
       body: new URLSearchParams({
@@ -129,8 +131,18 @@ async function exchangeCode(request, env, code, fetchImpl) {
       }).toString(),
       signal: AbortSignal.timeout(8000),
     });
-  } catch {
-    throw new Error("Google authorization failed.");
+  } catch (err) {
+    const failure = new Error("Google authorization failed.");
+    failure.code = "fetch_failed";
+    const name = safeCauseName(err && err.name);
+    if (name) failure.causeName = name;
+    throw failure;
+  }
+  if (response.status >= 300 && response.status < 400) {
+    await discardBody(response);
+    const failure = new Error("Google authorization failed.");
+    failure.status = response.status;
+    throw failure;
   }
   if (!response.ok) {
     const failure = new Error("Google authorization failed.");
@@ -146,10 +158,13 @@ async function exchangeCode(request, env, code, fetchImpl) {
   };
 }
 
+const IDENTITY_SCOPE = /^(?:openid|email|profile|userinfo\.[a-z0-9_~-]+|https:\/\/www\.googleapis\.com\/auth\/userinfo\.[a-z0-9_~-]+)$/;
+
 export function scopeIsCalendarReadonly(scope) {
   if (typeof scope !== "string") return false;
   const parts = scope.split(/\s+/).filter(Boolean);
-  return parts.length === 1 && parts[0] === CALENDAR_SCOPE;
+  if (!parts.includes(CALENDAR_SCOPE)) return false;
+  return parts.every((part) => part === CALENDAR_SCOPE || IDENTITY_SCOPE.test(part));
 }
 
 async function requestAccessToken(env, refreshToken, fetchImpl) {
@@ -157,8 +172,7 @@ async function requestAccessToken(env, refreshToken, fetchImpl) {
   try {
     response = await fetchImpl(TOKEN_URL, {
       method: "POST",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
+      redirect: "manual",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: new URLSearchParams({
         client_id: String(env.GOOGLE_CLIENT_ID).trim(),
@@ -172,7 +186,7 @@ async function requestAccessToken(env, refreshToken, fetchImpl) {
   } catch {
     throw new Error("Google authorization failed.");
   }
-  if (!response.ok) {
+  if (response.status >= 300 && response.status < 400 || !response.ok) {
     try { await response.text(); } catch { /* discard */ }
     throw new Error("Google authorization failed.");
   }
@@ -208,6 +222,18 @@ async function googleTokenError(response) {
 
 function safeErrorCode(value) {
   return typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value) ? value : "";
+}
+
+function safeCauseName(value) {
+  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(value) ? value : "";
+}
+
+async function discardBody(response) {
+  try {
+    if (response && typeof response.text === "function") await response.text();
+  } catch {
+    // The redirect body is not used.
+  }
 }
 
 function doneUrl(request, result, reason) {

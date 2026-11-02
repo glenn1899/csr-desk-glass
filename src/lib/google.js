@@ -68,8 +68,7 @@ export async function fetchGoogleEvents(env, window, fetchImpl) {
     try {
       response = await fetchImpl(url, {
         method: "GET",
-        redirect: "follow",
-        referrerPolicy: "no-referrer",
+        redirect: "manual",
         headers: {
           accept: "application/json",
           authorization: `Bearer ${accessToken}`,
@@ -79,7 +78,9 @@ export async function fetchGoogleEvents(env, window, fetchImpl) {
     } catch {
       throw new Error("Could not read the Google calendar.");
     }
-    if (!response.ok) throw new Error("Could not read the Google calendar.");
+    if (!response || response.status < 200 || response.status >= 300) {
+      throw new Error("Could not read the Google calendar.");
+    }
     const payload = await response.json();
     if (payload && Array.isArray(payload.items)) items.push(...payload.items);
     if (!payload || !payload.nextPageToken) break;
