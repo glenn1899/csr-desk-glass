@@ -7,6 +7,7 @@ import {
   CALENDAR_SCOPE,
   REFRESH_KEY,
   handleCallback,
+  scopeIsCalendarReadonly,
 } from "../src/lib/oauth.js";
 
 const OWNER = { "Cf-Access-Authenticated-User-Email": "owner@example.com" };
@@ -307,6 +308,8 @@ test("the code exchange posts the same redirect URI that connect start uses", as
   assert.equal(params.get("redirect_uri"), redirectUri);
   assert.equal(params.get("grant_type"), "authorization_code");
   assert.equal(seen.options.body.includes("scope="), false);
+  assert.equal(seen.options.redirect, "manual");
+  assert.equal(Object.hasOwn(seen.options, "referrerPolicy"), false);
 });
 
 test("the desk page shows an allowlisted connect error", async () => {
@@ -315,8 +318,127 @@ test("the desk page shows an allowlisted connect error", async () => {
   assert.match(html, /Could not connect the calendar \(invalid_client\)\./);
   assert.match(html, /Could not connect the calendar \(invalid_grant\)\./);
   assert.match(html, /Could not connect the calendar \(redirect_uri_mismatch\)\./);
+  assert.match(html, /Could not connect the calendar \(fetch_failed\)\./);
   assert.match(html, /hasOwnProperty\.call\(connectErrors, connectCode\)/);
   assert.equal(html.includes('connectNote = params.get("reason")'), false);
+});
+
+test("calendar.readonly may include only identity scopes", () => {
+  const identity = [
+    "openid",
+    "email",
+    "profile",
+    "userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+  ];
+  assert.equal(scopeIsCalendarReadonly(CALENDAR_SCOPE), true);
+  assert.equal(scopeIsCalendarReadonly(`${CALENDAR_SCOPE} ${identity.join(" ")}`), true);
+  assert.equal(scopeIsCalendarReadonly(`openid ${CALENDAR_SCOPE} email`), true);
+  assert.equal(scopeIsCalendarReadonly("openid email profile"), false);
+  assert.equal(scopeIsCalendarReadonly(`${CALENDAR_SCOPE} https://www.googleapis.com/auth/calendar`), false);
+  assert.equal(scopeIsCalendarReadonly(`${CALENDAR_SCOPE} https://www.googleapis.com/auth/calendar.events`), false);
+  assert.equal(scopeIsCalendarReadonly(`${CALENDAR_SCOPE} https://www.googleapis.com/auth/calendar.events.readonly`), false);
+  assert.equal(scopeIsCalendarReadonly(`${CALENDAR_SCOPE} https://www.googleapis.com/auth/drive.readonly`), false);
+  assert.equal(scopeIsCalendarReadonly(`${CALENDAR_SCOPE} https://www.googleapis.com/auth/userinfo.email.extra`), false);
+  assert.equal(scopeIsCalendarReadonly(""), false);
+  assert.equal(scopeIsCalendarReadonly(null), false);
+});
+
+test("identity scopes alongside calendar.readonly are saved", async () => {
+  const state = "1".repeat(64);
+  const kv = mockKv();
+  const response = await handleCallback(
+    new Request(`https://desk.example/auth/callback?code=auth-code&state=${state}`, {
+      headers: { cookie: `cal_oauth_state=${state}` },
+    }),
+    { GOOGLE_CLIENT_ID: "client-id", GOOGLE_CLIENT_SECRET: "client-secret", CAL_KV: kv },
+    async () => new Response(JSON.stringify({
+      access_token: "ya29.should-not-leak",
+      refresh_token: "refresh-should-not-leak",
+      expires_in: 3600,
+      scope: `${CALENDAR_SCOPE} openid email https://www.googleapis.com/auth/userinfo.profile`,
+    }), { status: 200 }),
+  );
+  assert.equal(new URL(response.headers.get("location")).searchParams.get("calendar"), "connected");
+  assert.equal(await kv.get(REFRESH_KEY), "refresh-should-not-leak");
+  assert.equal((await response.text()).includes("refresh-should-not-leak"), false);
+});
+
+test("a thrown token fetch is logged as fetch_failed without the error text", async () => {
+  const state = "2".repeat(64);
+  const kv = mockKv();
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(String(line));
+  let response;
+  try {
+    response = await handleCallback(
+      new Request(`https://desk.example/auth/callback?code=secret-auth-code&state=${state}`, {
+        headers: { cookie: `cal_oauth_state=${state}` },
+      }),
+      { GOOGLE_CLIENT_ID: "client-id", GOOGLE_CLIENT_SECRET: "client-secret", CAL_KV: kv },
+      async () => {
+        const failure = new TypeError("https://oauth2.googleapis.com/token secret-auth-code client-secret");
+        failure.name = "TypeError";
+        throw failure;
+      },
+    );
+  } finally {
+    console.log = original;
+  }
+  const location = new URL(response.headers.get("location"));
+  assert.equal(location.searchParams.get("calendar"), "error");
+  assert.equal(location.searchParams.get("reason"), "fetch_failed");
+  assert.equal(await kv.get(REFRESH_KEY), null);
+  assert.deepEqual(lines, [
+    JSON.stringify({
+      level: "error",
+      message: "calendar_connect_failed",
+      error: "fetch_failed",
+      name: "TypeError",
+    }),
+  ]);
+  const shown = `${lines.join("\n")}${location}`;
+  assert.equal(shown.includes("secret-auth-code"), false);
+  assert.equal(shown.includes("oauth2.googleapis.com"), false);
+  assert.equal(shown.includes("client-secret"), false);
+});
+
+test("a token redirect is a failure and is not followed", async () => {
+  const state = "3".repeat(64);
+  const kv = mockKv();
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(String(line));
+  let calls = 0;
+  let response;
+  try {
+    response = await handleCallback(
+      new Request(`https://desk.example/auth/callback?code=secret-auth-code&state=${state}`, {
+        headers: { cookie: `cal_oauth_state=${state}` },
+      }),
+      { GOOGLE_CLIENT_ID: "client-id", GOOGLE_CLIENT_SECRET: "client-secret", CAL_KV: kv },
+      async () => {
+        calls += 1;
+        return new Response("secret-auth-code", {
+          status: 302,
+          headers: { location: "https://evil.example/steal?code=secret-auth-code" },
+        });
+      },
+    );
+  } finally {
+    console.log = original;
+  }
+  assert.equal(calls, 1);
+  const location = new URL(response.headers.get("location"));
+  assert.equal(location.searchParams.get("calendar"), "error");
+  assert.equal(location.searchParams.get("reason"), null);
+  assert.deepEqual(lines.map((line) => JSON.parse(line)), [
+    { level: "error", message: "calendar_connect_failed", status: 302 },
+  ]);
+  assert.equal(lines.join("\n").includes("evil.example"), false);
+  assert.equal(lines.join("\n").includes("secret-auth-code"), false);
 });
 
 test("a malformed state cookie is ignored", async () => {

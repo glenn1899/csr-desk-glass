@@ -146,15 +146,14 @@ async function jwkForKid(team, kid, fetchImpl, nowMs) {
   try {
     response = await fetchImpl(`https://${team}/cdn-cgi/access/certs`, {
       method: "GET",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
+      redirect: "manual",
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(8000),
     });
   } catch {
     return null;
   }
-  if (!response || !response.ok) return null;
+  if (!response || response.status < 200 || response.status >= 300) return null;
   const body = await response.json();
   if (!entry || entry.expires <= nowMs) {
     entry = { expires: nowMs + CERT_TTL_MS, keys: new Map() };
