@@ -135,7 +135,24 @@
   .meet { width: .375rem; height: .375rem; margin-left: .3rem; border-radius: 999px; background: #007aff; display: inline-block; }
   .meet.team { background: #ff9f0a; }
   .cal { margin-top: 0; border-radius: 28px; padding: 1rem; color: #1d1d1f; }
-  #next .next { margin-top: 1rem; }
+  .month { border-radius: 28px; padding: .85rem .65rem .7rem; }
+  .month + .cal { margin-top: 1rem; }
+  .mcap { margin: 0 0 .45rem; text-align: center; font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+  .mgrid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-rows: 1rem repeat(6, 1.55rem);
+    align-items: center;
+    justify-items: center;
+  }
+  .mwd { font-size: 10px; font-weight: 600; letter-spacing: .05em; color: #86868b; }
+  .mcell { font-size: 12px; font-variant-numeric: tabular-nums; color: #1d1d1f; line-height: 1; }
+  .mcell.out { color: #c7c7cc; }
+  .mcell.today span {
+    min-width: 1.4rem; height: 1.4rem; padding: 0 .2rem;
+    display: grid; place-items: center; border-radius: 999px;
+    background: #007aff; color: #fff; font-weight: 600;
+  }
   .cal h2 { margin: .5rem 0 0; font-size: 17px; line-height: 1.25; font-weight: 500; }
   .cal .kicker, .cal .meta { font-size: 12px; }
   .cal .kicker { margin: 0; letter-spacing: .04em; text-transform: uppercase; color: #007aff; }
@@ -434,20 +451,38 @@
       (block.id === "afternoon" ? '<p class="exit"><b style="color:#1d1d1f">Exit check. </b>' + esc(EXIT) + "</p>" : "") +
       "</div></section>";
   }
-  function nextHtml(c) {
-    var block = c.focus.next;
-    if (!block || c.focus.later) return "";
-    var remain = c.preview ? null : Math.max(0, until(block.start, c.clock));
-    var frac = remain == null ? 0 : Math.min(1, remain / waitSpan(block));
-    var items = block.tasks.map(function (t) {
-      var inactive = t.monday && !c.focus.monday;
-      return "<li><b>" + esc(inactive ? "Mon" : TAG[t.tag]) + "</b><span style=\"display:block\">" + esc(t.text) + "</span></li>";
+  /* month-grid */
+  function monthCells(year, month, todayYmd) {
+    var cursor = new Date(Date.UTC(year, month - 1, 1));
+    var lead = cursor.getUTCDay();
+    cursor.setUTCDate(1 - lead);
+    var cells = [];
+    for (var i = 0; i < 42; i++) {
+      var y = cursor.getUTCFullYear();
+      var m = cursor.getUTCMonth() + 1;
+      var d = cursor.getUTCDate();
+      var ymd = y + "-" + (m < 10 ? "0" : "") + m + "-" + (d < 10 ? "0" : "") + d;
+      cells.push({ ymd: ymd, day: d, inMonth: y === year && m === month, today: ymd === todayYmd });
+      cursor.setUTCDate(d + 1);
+    }
+    return cells;
+  }
+  /* month-grid-end */
+  function monthHtml(clock) {
+    var parts = clock.ymd.split("-");
+    var year = Number(parts[0]);
+    var month = Number(parts[1]);
+    var cells = monthCells(year, month, clock.ymd);
+    var title = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, 1)));
+    var heads = ["S", "M", "T", "W", "T", "F", "S"].map(function (name) {
+      return '<span class="mwd">' + name + "</span>";
     }).join("");
-    return '<aside class="next glass"><p class="kicker">Up next</p>' +
-      (remain == null ? "" : '<div class="remain"><div class="track"><span id="remain" style="width:' + (frac * 100) + '%"></span></div><b id="remain-label">' + spanText(remain) + "</b></div>") +
-      "<h2>" + esc(block.title) + "</h2><p class=\"meta\">" + esc(block.window) + "</p>" +
-      (block.phone ? '<p class="meta">' + esc(block.phone.label) + "</p>" : "") +
-      "<ul>" + items + "</ul></aside>";
+    var days = cells.map(function (cell) {
+      var cls = "mcell" + (cell.inMonth ? "" : " out") + (cell.today ? " today" : "");
+      var mark = cell.today ? "<span>" + cell.day + "</span>" : String(cell.day);
+      return '<span class="' + cls + '"' + (cell.today ? ' aria-current="date"' : "") + ">" + mark + "</span>";
+    }).join("");
+    return '<section class="month glass" aria-label="' + esc(title) + '"><p class="mcap">' + esc(title) + '</p><div class="mgrid">' + heads + days + "</div></section>";
   }
   function paintStructure(c) {
     var live = liveId(c.clock);
@@ -461,7 +496,7 @@
         '<span class="name">' + esc(b.short) + "</span></button>";
     }).join("");
     document.getElementById("now").innerHTML = nowHtml(c);
-    document.getElementById("next").innerHTML = calendarCard(c) + nextHtml(c);
+    document.getElementById("next").innerHTML = monthHtml(c.clock) + calendarCard(c);
     document.getElementById("tail").innerHTML =
       '<details><summary>Whole day <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary><div class="day glass">' +
       BLOCKS.map(function (b) {
