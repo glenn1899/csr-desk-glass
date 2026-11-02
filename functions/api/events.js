@@ -1,9 +1,10 @@
 import { loadEvents } from "../_lib/schedule.js";
 
-const HEADERS = {
+const BASE_HEADERS = {
   "content-type": "application/json; charset=utf-8",
-  "cache-control": "private, max-age=60",
+  "cdn-cache-control": "no-store",
   "x-content-type-options": "nosniff",
+  "x-robots-tag": "noindex",
 };
 
 export async function onRequest(context) {
@@ -29,6 +30,10 @@ export async function onRequest(context) {
 function respond(body, status, extra, head) {
   return new Response(head ? null : JSON.stringify(body), {
     status,
-    headers: { ...HEADERS, ...extra },
+    headers: {
+      ...BASE_HEADERS,
+      "cache-control": status >= 400 ? "private, no-store" : "private, max-age=60",
+      ...extra,
+    },
   });
 }

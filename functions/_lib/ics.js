@@ -73,8 +73,6 @@ export async function fetchIcsEvents(url, window, fetchImpl) {
     throw new Error("Could not read the calendar feed.");
   }
   if (!response || !response.ok) throw new Error("Could not read the calendar feed.");
-  const length = Number(response.headers.get("content-length") || 0);
-  if (length > 2_000_000) throw new Error("Calendar file is too large.");
   const text = await readTextLimited(response, 2_000_000);
   return parseIcs(text, window);
 }
@@ -111,6 +109,23 @@ function unfold(text) {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n[ \t]/g, "");
 }
 
+function withoutNestedComponents(lines) {
+  const kept = [];
+  let depth = 0;
+  for (const line of lines) {
+    if (/^BEGIN:/i.test(line)) {
+      depth += 1;
+      continue;
+    }
+    if (/^END:/i.test(line)) {
+      if (depth > 0) depth -= 1;
+      continue;
+    }
+    if (depth === 0) kept.push(line);
+  }
+  return kept;
+}
+
 function extractBlocks(text, name) {
   const lines = text.split("\n");
   const blocks = [];
@@ -133,7 +148,7 @@ function extractBlocks(text, name) {
 function parseEvent(lines, index) {
   const props = {};
   const exdateProps = [];
-  for (const line of lines) {
+  for (const line of withoutNestedComponents(lines)) {
     const prop = parseLine(line);
     if (!prop) continue;
     if (prop.name === "EXDATE") exdateProps.push(prop);
@@ -298,11 +313,10 @@ function expandYearly(master, rule, rangeStart, rangeEnd) {
   for (let step = 0; step < 200; step++) {
     if (rule.count != null && produced >= rule.count) break;
     const year = start.y + step * rule.interval;
+    if (year > rangeEnd.y || (year === rangeEnd.y && start.m > rangeEnd.m)) break;
     const date = { y: year, m: start.m, d: start.d };
-    if (date.d > daysInMonth(date.y, date.m)) {
-      produced += 1;
-      continue;
-    }
+    // 29 February in a non-leap year is not an occurrence and does not use up COUNT.
+    if (date.d > daysInMonth(date.y, date.m)) continue;
     if (pastUntil(master, date)) break;
     produced += 1;
     if (compareYmd(date, rangeEnd) >= 0) break;
@@ -339,9 +353,14 @@ function monthDates(year, month, start, rule) {
     return dates;
   }
   const days = rule.bymonthday && rule.bymonthday.length ? rule.bymonthday : [start.d];
+  const dim = daysInMonth(year, month);
   const dates = [];
+  const seen = new Set();
   for (const day of days) {
-    if (day >= 1 && day <= daysInMonth(year, month)) dates.push({ y: year, m: month, d: day });
+    const resolved = day > 0 ? day : dim + day + 1;
+    if (resolved < 1 || resolved > dim || seen.has(resolved)) continue;
+    seen.add(resolved);
+    dates.push({ y: year, m: month, d: resolved });
   }
   dates.sort(compareYmd);
   return dates;

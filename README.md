@@ -16,7 +16,7 @@ The endpoint picks a source from the Pages environment:
 
 If `ICS_URL` and the Google variables are both set, the iCal address wins. If only some of the Google variables are set, the endpoint returns an error instead of pretending the sample calendar is real.
 
-Times are converted to Eastern time (America/Toronto). The response includes `Cache-Control: private, max-age=60`, so a browser may reuse it for about a minute. Secrets are not written to logs and are not included in the JSON.
+Times are converted to Eastern time (America/Toronto). A successful response may be reused by the browser for about a minute (`Cache-Control: private, max-age=60`). A failed response is not cached. `CDN-Cache-Control: no-store` tells Cloudflare not to keep a copy, which matters once Cloudflare Access is in front of the site. Secrets are not written to logs and are not included in the JSON.
 
 ### Variables to set in Cloudflare
 

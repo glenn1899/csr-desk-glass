@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CSR Desk</title>
 <meta name="theme-color" content="#e7eef6">
+<meta name="robots" content="noindex">
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
@@ -232,11 +233,22 @@
     var hour = Number(part(parts, "hour"));
     var minute = Number(part(parts, "minute"));
     var second = Number(part(parts, "second"));
+    var year = part(parts, "year");
+    var month = part(parts, "month");
+    var day = part(parts, "day");
     var weekday = part(parts, "weekday");
     var days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
     if (days.indexOf(weekday) < 0) weekday = "Mon";
+    // Some browsers report midnight as 24:00 on the previous date.
+    if (hour === 24) {
+      hour = 0;
+      var rolled = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day) + 1));
+      year = String(rolled.getUTCFullYear());
+      month = pad(rolled.getUTCMonth() + 1);
+      day = pad(rolled.getUTCDate());
+    }
     return {
-      ymd: part(parts, "year") + "-" + part(parts, "month") + "-" + part(parts, "day"),
+      ymd: year + "-" + month + "-" + day,
       weekday: weekday, minutes: hour * 60 + minute, seconds: second,
       dateLabel: new Intl.DateTimeFormat("en-US", { timeZone:"America/Toronto", weekday:"long", month:"long", day:"numeric" }).format(date),
       tz: part(parts, "timeZoneName") || "ET"
@@ -461,10 +473,10 @@
     var banner = "";
     if (preview && focus) {
       banner = '<div class="banner"><p>Previewing ' + esc(focus.title) + '.</p><button type="button" id="back">Back</button></div>';
-    } else if (data && data.source === "sample" && data.notice && status !== "loading") {
-      banner = '<div class="note glass" role="status">' + esc(data.notice) + "</div>";
     } else if (status === "error" && data) {
       banner = '<div class="note glass" role="status">' + esc(errorMsg) + "</div>";
+    } else if (data && data.source === "sample" && data.notice && status !== "loading") {
+      banner = '<div class="note glass" role="status">' + esc(data.notice) + "</div>";
     }
     document.getElementById("banner").innerHTML = banner;
     var nowHtml = "";

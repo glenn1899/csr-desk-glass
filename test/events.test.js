@@ -175,6 +175,8 @@ test("the Pages function serves sample JSON with a one-minute private cache", as
   });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, max-age=60");
+  assert.equal(response.headers.get("cdn-cache-control"), "no-store");
+  assert.equal(response.headers.get("x-robots-tag"), "noindex");
   assert.match(response.headers.get("content-type"), /^application\/json/);
   const body = await response.json();
   assert.equal(body.source, "sample");
@@ -182,11 +184,48 @@ test("the Pages function serves sample JSON with a one-minute private cache", as
   assert.equal(JSON.stringify(body).includes("evil.example"), false);
 });
 
-test("other methods are rejected", async () => {
-  const response = await onRequest({
+test("failed responses are not cached", async () => {
+  const rejected = await onRequest({
     request: new Request("https://desk.example/api/events", { method: "POST" }),
     env: {},
   });
-  assert.equal(response.status, 405);
-  assert.equal(response.headers.get("allow"), "GET, HEAD");
+  assert.equal(rejected.status, 405);
+  assert.equal(rejected.headers.get("allow"), "GET, HEAD");
+  assert.equal(rejected.headers.get("cache-control"), "private, no-store");
+  assert.equal(rejected.headers.get("cdn-cache-control"), "no-store");
+
+  const env = {};
+  Object.defineProperty(env, "ICS_URL", { get() { throw new Error("boom https://secret.example/feed"); } });
+  const failed = await onRequest({
+    request: new Request("https://desk.example/api/events"),
+    env,
+  });
+  assert.equal(failed.status, 500);
+  assert.equal(failed.headers.get("cache-control"), "private, no-store");
+  const body = await failed.json();
+  assert.equal(JSON.stringify(body).includes("secret.example"), false);
+});
+
+test("a wrong Content-Length does not hide a small calendar, and a huge feed is refused", async () => {
+  const small = await loadEvents({ ICS_URL: "https://calendar.example/feed.ics" }, {
+    now: NOW,
+    fetchImpl: async () => new Response(`BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:one
+SUMMARY:Kept
+DTSTART:20261102T150000Z
+DTEND:20261102T160000Z
+END:VEVENT
+END:VCALENDAR`, { status: 200, headers: { "content-length": "9000000" } }),
+  });
+  assert.equal(small.status, 200);
+  assert.equal(small.body.events[0].title, "Kept");
+
+  const huge = await loadEvents({ ICS_URL: "https://calendar.example/feed.ics" }, {
+    now: NOW,
+    fetchImpl: async () => new Response(`BEGIN:VCALENDAR\n${"A".repeat(2_000_001)}`, { status: 200 }),
+  });
+  assert.equal(huge.status, 502);
+  assert.equal(huge.body.error, "Calendar file is too large.");
+  assert.equal(huge.body.events.length, 0);
 });

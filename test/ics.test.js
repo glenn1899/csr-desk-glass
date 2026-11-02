@@ -233,6 +233,71 @@ test("a file that is not a calendar is rejected", () => {
   assert.throws(() => parseIcs("<html>not a calendar</html>", november), /Could not read the calendar feed/);
 });
 
+test("a meeting in the spring-forward gap is skipped", () => {
+  const events = parseIcs(calendar(`
+BEGIN:VEVENT
+UID:gap-day
+SUMMARY:Does not exist
+DTSTART;TZID=America/Toronto:20260308T023000
+DTEND;TZID=America/Toronto:20260308T024500
+RRULE:FREQ=DAILY
+END:VEVENT`), windowBetween("2026-03-08", "2026-03-11"));
+  assert.deepEqual(events.map((event) => event.start), [
+    "2026-03-09T02:30:00-04:00",
+    "2026-03-10T02:30:00-04:00",
+  ]);
+});
+
+test("monthly on the last day follows the short months", () => {
+  const events = parseIcs(calendar(`
+BEGIN:VEVENT
+UID:month-end
+SUMMARY:Last day
+DTSTART;TZID=America/Toronto:20261031T090000
+DTEND;TZID=America/Toronto:20261031T100000
+RRULE:FREQ=MONTHLY;BYMONTHDAY=-1
+END:VEVENT`), windowBetween("2026-11-01", "2027-03-01"));
+  assert.deepEqual(events.map((event) => event.start.slice(0, 10)), [
+    "2026-11-30",
+    "2026-12-31",
+    "2027-01-31",
+    "2027-02-28",
+  ]);
+});
+
+test("a leap-day birthday does not use up COUNT on missing years", () => {
+  const events = parseIcs(calendar(`
+BEGIN:VEVENT
+UID:leap
+SUMMARY:Leap birthday
+DTSTART;VALUE=DATE:20200229
+DTEND;VALUE=DATE:20200301
+RRULE:FREQ=YEARLY;COUNT=2
+END:VEVENT`), windowBetween("2020-01-01", "2030-01-01"));
+  assert.deepEqual(events.map((event) => event.startDate), ["2020-02-29", "2024-02-29"]);
+});
+
+test("a reminder block cannot rename the event", () => {
+  const events = parseIcs(calendar(`
+BEGIN:VEVENT
+UID:dentist
+SUMMARY:Dentist
+DESCRIPTION:Bring card
+LOCATION:Clinic
+DTSTART;TZID=America/Toronto:20261102T090000
+DTEND;TZID=America/Toronto:20261102T100000
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:This is an event reminder
+SUMMARY:Alarm title
+TRIGGER:-PT30M
+END:VALARM
+END:VEVENT`), november);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].title, "Dentist");
+  assert.equal(events[0].location, "Clinic");
+});
+
 test("DURATION sets the end from the start", () => {
   const events = parseIcs(calendar(`
 BEGIN:VEVENT

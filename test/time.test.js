@@ -38,6 +38,17 @@ test("the hour before the spring clock change is still standard time", () => {
   assert.equal(after.toISOString(), "2026-03-08T07:30:00.000Z");
 });
 
+test("a clock time in the spring-forward gap is not invented", () => {
+  assert.equal(zonedWallTimeToUtc({ y: 2026, m: 3, d: 8, hh: 2, mm: 30, ss: 0 }, TORONTO), null);
+  assert.equal(zonedWallTimeToUtc({ y: 2026, m: 3, d: 8, hh: 2, mm: 0, ss: 0 }, TORONTO), null);
+});
+
+test("the repeated autumn hour keeps the earlier instant", () => {
+  const instant = zonedWallTimeToUtc({ y: 2026, m: 11, d: 1, hh: 1, mm: 30, ss: 0 }, TORONTO);
+  assert.equal(instant.toISOString(), "2026-11-01T05:30:00.000Z");
+  assert.equal(formatInTimeZone(instant, TORONTO), "2026-11-01T01:30:00-04:00");
+});
+
 test("the schedule window starts at Toronto midnight and runs 14 days", () => {
   const window = torontoWindow(new Date("2026-11-02T14:30:00Z"));
   assert.equal(window.startDate, "2026-11-02");

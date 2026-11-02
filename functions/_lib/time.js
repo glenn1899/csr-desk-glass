@@ -92,11 +92,14 @@ export function parseYmd(value) {
 
 // Wall-clock time in an IANA zone, as a UTC instant. Two passes settle
 // daylight-saving differences between the guess and the resulting instant.
+// When the local clock repeats an hour, the earlier instant is kept.
+// Returns null when that clock time does not exist, such as 2:30 AM on the
+// spring-forward morning. Callers skip that occurrence instead of shifting it.
 export function zonedWallTimeToUtc(parts, timeZone) {
   if (timeZone === "UTC" || timeZone === "Etc/UTC" || timeZone === "Z") {
-    return new Date(Date.UTC(parts.y, parts.m - 1, parts.d, parts.hh, parts.mm, parts.ss));
+    return new Date(Date.UTC(parts.y, parts.m - 1, parts.d, parts.hh, parts.mm, parts.ss || 0));
   }
-  const wall = Date.UTC(parts.y, parts.m - 1, parts.d, parts.hh, parts.mm, parts.ss);
+  const wall = Date.UTC(parts.y, parts.m - 1, parts.d, parts.hh, parts.mm, parts.ss || 0);
   let utc = wall;
   for (let pass = 0; pass < 3; pass++) {
     const offset = zonedParts(new Date(utc), timeZone).offsetMinutes;
@@ -104,7 +107,15 @@ export function zonedWallTimeToUtc(parts, timeZone) {
     if (next === utc) break;
     utc = next;
   }
-  return new Date(utc);
+  const date = new Date(utc);
+  const back = zonedParts(date, timeZone);
+  const sameClock = back.y === parts.y
+    && back.m === parts.m
+    && back.d === parts.d
+    && back.hh === parts.hh
+    && back.mm === parts.mm
+    && back.ss === (parts.ss || 0);
+  return sameClock ? date : null;
 }
 
 export function torontoWindow(now) {
