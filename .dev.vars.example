@@ -8,6 +8,8 @@
 # GOOGLE_CLIENT_ID=""
 # GOOGLE_CLIENT_SECRET=""
 # CALENDAR_ID="primary"
+# CALENDAR_IDS="primary"
+# CALENDAR_NAMES="Broker Support Team"
 
 # Optional fallback when CAL_KV has no refresh token.
 # GOOGLE_REFRESH_TOKEN=""

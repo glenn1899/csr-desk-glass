@@ -1,6 +1,6 @@
 # CSR Desk
 
-A glass-styled desk page. The clock and the schedule use Eastern time (America/Toronto).
+A glass-styled desk page. The weekday plan is six time blocks, with the weekend closed. The clock and the blocks use Eastern time (America/Toronto). Calendar events sit beside that plan.
 
 ## Calendar data
 
@@ -17,13 +17,15 @@ Times are converted to Eastern time (America/Toronto). A successful `/api/events
 1. In Google Cloud, create a project and enable the Google Calendar API.
 2. On the OAuth consent screen, choose External (or Internal if this is a Workspace account) and set the publishing status to **Testing**. Add the owner as a test user. The app only needs the read-only calendar scope.
 3. Create an OAuth client of type **Web application**. Under authorized redirect URIs, add exactly `https://csr-desk-glass.glenn-889.workers.dev/auth/callback`.
-4. This site is the Cloudflare Worker named `csr-desk-glass`, not a Pages project. `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `CALENDAR_ID` are already set on that Worker. Use an encrypted secret only if you also set `GOOGLE_REFRESH_TOKEN` by hand. `wrangler.jsonc` binds `CAL_KV` to the namespace `csr-desk-glass-cal`.
+4. This site is the Cloudflare Worker named `csr-desk-glass`, not a Pages project. `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `CALENDAR_ID` are already set on that Worker. To also read the team calendar, set `CALENDAR_NAMES` to `Broker Support Team` (exact name, no id). `CALENDAR_ID=primary` is still used when `CALENDAR_IDS` is empty. Use an encrypted secret only if you also set `GOOGLE_REFRESH_TOKEN` by hand. `wrangler.jsonc` binds `CAL_KV` to the namespace `csr-desk-glass-cal`.
 
 | Name | What it is |
 | --- | --- |
 | `GOOGLE_CLIENT_ID` | OAuth client id |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
-| `CALENDAR_ID` | Calendar to read. `primary` is allowed |
+| `CALENDAR_ID` | One calendar. Used when `CALENDAR_IDS` is empty. `primary` is allowed |
+| `CALENDAR_IDS` | Optional. Comma-separated calendar ids. When set, this replaces `CALENDAR_ID` |
+| `CALENDAR_NAMES` | Optional. Comma-separated calendar names. Each name must match the calendar’s summary exactly, for example `Broker Support Team` |
 | `CAL_KV` | KV binding for the namespace `csr-desk-glass-cal` |
 | `GOOGLE_REFRESH_TOKEN` | Optional secret. Used only when `CAL_KV` has no refresh token |
 

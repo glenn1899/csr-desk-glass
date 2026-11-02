@@ -29,7 +29,13 @@ test("the worker serves the bundled desk page", async () => {
   const page = await worker.fetch(new Request(`${SITE}/`), {});
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-type"), /^text\/html/);
-  assert.match(await page.text(), /<title>CSR Desk<\/title>/);
+  const html = await page.text();
+  assert.match(html, /<title>CSR Desk<\/title>/);
+  assert.match(html, /Morning batch/);
+  assert.match(html, /Office closed/);
+  assert.match(html, /Do now/);
+  assert.match(html, /Up next on calendar/);
+  assert.match(html, /Exit check/);
 
   const named = await worker.fetch(new Request(`${SITE}/index.html`), {});
   assert.equal(named.status, 200);

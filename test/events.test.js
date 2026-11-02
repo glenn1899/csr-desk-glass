@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest } from "../src/routes/events.js";
-import { mapGoogleItems } from "../src/lib/google.js";
+import { mapGoogleItems, mergeCalendarEvents } from "../src/lib/google.js";
 import { ACCESS_KEY, CALENDAR_SCOPE, REFRESH_KEY } from "../src/lib/oauth.js";
 import { loadEvents } from "../src/lib/schedule.js";
 
@@ -241,6 +241,169 @@ test("failed responses are not cached", async () => {
   assert.equal(failed.headers.get("cache-control"), "private, no-store");
   const failedBody = await failed.json();
   assert.equal(JSON.stringify(failedBody).includes("secret.example"), false);
+});
+
+test("the same meeting on two calendars is kept once and marked as the team copy", () => {
+  const personal = {
+    uid: "personal-copy",
+    icalUid: "shared-meeting",
+    title: "Standup",
+    allDay: false,
+    start: "2026-11-02T09:00:00-05:00",
+    end: "2026-11-02T09:30:00-05:00",
+    calendar: "Primary",
+    team: false,
+  };
+  const team = { ...personal, uid: "team-copy", calendar: "Broker Support Team", team: true };
+  const merged = mergeCalendarEvents([[personal], [team, {
+    uid: "only-team",
+    icalUid: "only-team",
+    title: "Renewals",
+    allDay: false,
+    start: "2026-11-02T14:00:00-05:00",
+    end: "2026-11-02T14:30:00-05:00",
+    calendar: "Broker Support Team",
+    team: true,
+  }]]);
+  assert.equal(merged.length, 2);
+  const standup = merged.find((event) => event.icalUid === "shared-meeting");
+  assert.equal(standup.team, true);
+  assert.equal(standup.calendar, "Broker Support Team");
+});
+
+test("named calendars are resolved, merged, and a missing calendar does not hide the rest", async () => {
+  const teamId = "team-cal@group.calendar.google.com";
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(String(line));
+  const started = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let result;
+  try {
+    const pending = loadEvents({
+      GOOGLE_CLIENT_ID: "client-id",
+      GOOGLE_CLIENT_SECRET: "client-secret",
+      GOOGLE_REFRESH_TOKEN: "refresh-token",
+      CALENDAR_ID: "should-not-be-used",
+      CALENDAR_IDS: "primary",
+      CALENDAR_NAMES: "Broker Support Team, Missing Calendar",
+    }, {
+      now: NOW,
+      fetchImpl: async (url) => {
+        const href = String(url);
+        if (href.includes("oauth2.googleapis.com")) {
+          return new Response(JSON.stringify({ access_token: "ya29.test-access", expires_in: 3600 }), { status: 200 });
+        }
+        if (href.includes("/users/me/calendarList")) {
+          assert.equal(new URL(href).searchParams.get("showHidden"), "true");
+          return new Response(JSON.stringify({
+            items: [
+              { id: teamId, summary: "Broker Support Team", description: "owner@example.com" },
+              { id: "other", summary: "Someone Else" },
+            ],
+          }), { status: 200 });
+        }
+        started.push(href);
+        await gate;
+        if (href.includes("/calendars/primary/events")) {
+          return new Response(JSON.stringify({
+            items: [{
+              id: "p-1",
+              iCalUID: "shared-meeting",
+              summary: "Standup",
+              start: { dateTime: "2026-11-02T09:00:00-05:00" },
+              end: { dateTime: "2026-11-02T09:30:00-05:00" },
+            }],
+          }), { status: 200 });
+        }
+        if (href.includes(encodeURIComponent(teamId))) {
+          return new Response(JSON.stringify({
+            items: [
+              {
+                id: "t-1",
+                iCalUID: "shared-meeting",
+                summary: "Standup",
+                start: { dateTime: "2026-11-02T09:00:00-05:00" },
+                end: { dateTime: "2026-11-02T09:30:00-05:00" },
+                attendees: [{ email: "owner@example.com" }],
+              },
+              {
+                id: "t-2",
+                iCalUID: "renewals",
+                summary: "Renewals",
+                start: { dateTime: "2026-11-02T14:00:00-05:00" },
+                end: { dateTime: "2026-11-02T14:30:00-05:00" },
+              },
+            ],
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: { message: "owner@example.com Private standup" } }), { status: 500 });
+      },
+    });
+    for (let i = 0; i < 20 && started.length < 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    assert.equal(started.length, 2);
+    assert.equal(started.some((href) => href.includes("should-not-be-used")), false);
+    release();
+    result = await pending;
+  } finally {
+    console.log = original;
+  }
+  assert.equal(result.status, 200);
+  assert.equal(result.body.notice, "One calendar could not be read.");
+  assert.equal(result.body.events.length, 2);
+  const standup = result.body.events.find((event) => event.title === "Standup");
+  assert.equal(standup.team, true);
+  assert.equal(standup.calendar, "Broker Support Team");
+  const renewals = result.body.events.find((event) => event.title === "Renewals");
+  assert.equal(renewals.team, true);
+  const body = JSON.stringify(result.body);
+  assert.equal(body.includes(teamId), false);
+  assert.equal(body.includes("owner@example.com"), false);
+  assert.equal(body.includes("should-not-be-used"), false);
+  const logged = lines.join("\n");
+  assert.match(logged, /calendar_partial_failed/);
+  assert.equal(logged.includes("Standup"), false);
+  assert.equal(logged.includes("owner@example.com"), false);
+  assert.equal(logged.includes(teamId), false);
+});
+
+test("one calendar failing still returns the others", async () => {
+  const result = await loadEvents({
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    GOOGLE_REFRESH_TOKEN: "refresh-token",
+    CALENDAR_IDS: "primary,team",
+  }, {
+    now: NOW,
+    fetchImpl: async (url) => {
+      const href = String(url);
+      if (href.includes("oauth2.googleapis.com")) {
+        return new Response(JSON.stringify({ access_token: "ya29.test-access", expires_in: 3600 }), { status: 200 });
+      }
+      if (href.includes("/calendars/primary/events")) {
+        return new Response(JSON.stringify({
+          items: [{
+            id: "p-1",
+            summary: "Client call",
+            start: { dateTime: "2026-11-02T09:30:00-05:00" },
+            end: { dateTime: "2026-11-02T10:00:00-05:00" },
+          }],
+        }), { status: 200 });
+      }
+      return new Response("hidden@example.com secret title", { status: 503 });
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.notice, "One calendar could not be read.");
+  assert.deepEqual(result.body.events.map((event) => event.title), ["Client call"]);
+  assert.equal(result.body.events[0].team, false);
+  assert.equal(result.body.events[0].calendar, "Primary");
+  const body = JSON.stringify(result.body);
+  assert.equal(body.includes("hidden@example.com"), false);
+  assert.equal(body.includes("secret title"), false);
 });
 
 function mockKv(initial = {}) {
