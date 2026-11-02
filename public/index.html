@@ -21,7 +21,7 @@
   }
   button, summary { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .wrap { max-width: 64rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+  .wrap { max-width: 64rem; margin: 0 auto; padding: 1.25rem 1.25rem 2.5rem; }
   .glass {
     border: 1px solid rgba(255,255,255,.8);
     background: rgba(255,255,255,.55);
@@ -30,7 +30,7 @@
     -webkit-backdrop-filter: blur(24px);
   }
   .top, .board { display: grid; gap: 1.5rem; align-items: start; }
-  .board { margin-top: 1.5rem; }
+  .board { margin-top: 1rem; }
   h1 { margin: 0; font-size: 2rem; line-height: 1; font-weight: 600; letter-spacing: -.03em; }
   .rail { margin-top: 1rem; display: flex; gap: .375rem; min-width: 0; overflow-x: auto; padding-bottom: .25rem; }
   .rail button {
@@ -47,7 +47,6 @@
   .rail .name { display: block; margin-top: .125rem; font-size: 13px; font-weight: 500; }
   .clock-col { width: 10.5rem; justify-self: center; }
   .clock { display: block; width: 100%; height: auto; overflow: visible; filter: drop-shadow(0 16px 30px rgba(40,60,100,.16)); }
-  .date { margin: .5rem 0 0; text-align: center; font-size: 13px; color: #86868b; white-space: nowrap; }
   .card { min-width: 0; overflow: hidden; border-radius: 28px; }
   .meter { height: .375rem; background: rgba(0,0,0,.05); }
   .meter > span { display: block; height: 100%; background: #007aff; }
@@ -71,6 +70,7 @@
   }
   .phone .k { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; opacity: .6; }
   .phone .v { margin: 0; font-size: 17px; font-weight: 600; }
+  .phone.on .v { color: #34c759; }
   .tasks { margin-top: 1.5rem; overflow: hidden; border-radius: 22px; padding: .25rem 1rem; }
   .task {
     display: grid; grid-template-columns: 2.75rem 5.25rem minmax(0,1fr);
@@ -134,7 +134,8 @@
   .fine { margin: 2rem 0 0; font-size: 12px; color: #86868b; }
   .meet { width: .375rem; height: .375rem; margin-left: .3rem; border-radius: 999px; background: #007aff; display: inline-block; }
   .meet.team { background: #ff9f0a; }
-  .cal { margin-top: 1rem; border-radius: 28px; padding: 1rem; color: #1d1d1f; }
+  .cal { margin-top: 0; border-radius: 28px; padding: 1rem; color: #1d1d1f; }
+  #next .next { margin-top: 1rem; }
   .cal h2 { margin: .5rem 0 0; font-size: 17px; line-height: 1.25; font-weight: 500; }
   .cal .kicker, .cal .meta { font-size: 12px; }
   .cal .kicker { margin: 0; letter-spacing: .04em; text-transform: uppercase; color: #007aff; }
@@ -178,6 +179,11 @@
           <circle cx="100" cy="100" r="86" fill="none" stroke="rgba(29,29,31,.08)" stroke-width="1"/>
           <g transform="translate(100 100)" stroke="#1d1d1f" id="ticks"></g>
           <g id="nums" fill="#1d1d1f" font-size="13" font-weight="500" font-family="-apple-system, BlinkMacSystemFont, sans-serif"></g>
+          <g id="daywin">
+            <rect x="114" y="86" width="40" height="28" rx="7" fill="#f7f4ee" stroke="rgba(29,29,31,.16)"/>
+            <text id="daywk" x="134" y="97" text-anchor="middle" fill="#6e6e73" font-size="7" font-weight="600" letter-spacing="0.9" font-family="-apple-system, BlinkMacSystemFont, sans-serif">MON</text>
+            <text id="daynum" x="134" y="109" text-anchor="middle" fill="#1d1d1f" font-size="13" font-weight="600" font-family="-apple-system, BlinkMacSystemFont, sans-serif">2</text>
+          </g>
           <g transform="translate(100 100)">
             <g id="hour">
               <line y1="10" y2="-34" stroke="#1c1c1e" stroke-width="3.4" stroke-linecap="square"/>
@@ -193,7 +199,6 @@
           </g>
         </svg>
       </div>
-      <p class="date" id="date">Eastern</p>
     </div>
   </div>
   <div class="board">
@@ -207,7 +212,6 @@
 (function () {
   var EXIT = "Inbox and voicemail at zero, or every open item has an owner and a deadline.";
   var TAG = { do: "Do now", resolve: "Resolve", batch: "Batch", park: "Park", note: "Note" };
-  var SHORT = { January:"Jan", February:"Feb", March:"Mar", April:"Apr", May:"May", June:"Jun", July:"Jul", August:"Aug", September:"Sep", October:"Oct", November:"Nov", December:"Dec" };
   var BLOCKS = [
     { id:"before", start:0, end:570, from:480, window:"Before 9:30", title:"Onboarding review", short:"Open", manager:true, phone:null, tasks:[
       { id:"before-abeyance", tag:"do", text:"Check the abeyance list. Flag anything overdue." },
@@ -331,8 +335,11 @@
   function save(day) {
     localStorage.setItem("csr-desk-glass-checks", JSON.stringify({ ymd: day, ids: checks }));
   }
+  function phoneOn(mode) {
+    return mode === "on" || mode === "finish";
+  }
   function phoneSvg(mode) {
-    var color = mode === "off" || mode === "overflow" ? "#ff3b30" : mode === "on" ? "#34c759" : "#1d1d1f";
+    var color = mode === "off" || mode === "overflow" ? "#ff3b30" : phoneOn(mode) ? "#34c759" : "#1d1d1f";
     if (mode === "overflow") return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="' + color + '" stroke-width="1.75"><circle cx="6" cy="12" r="3.2"/><circle cx="18" cy="12" r="3.2"/><path d="M6 15.2h12"/></svg>';
     var slash = mode === "off" ? '<path d="M4 4l16 16"/>' : "";
     return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="' + color + '" stroke-width="1.75" stroke-linecap="round"><path d="M7 3.5h2.2l1.2 3-1.6 1a12 12 0 0 0 5.7 5.7l1-1.6 3 1.2V15a2 2 0 0 1-2.2 2A15 15 0 0 1 5 6.7 2 2 0 0 1 7 3.5z"/>' + slash + '</svg>';
@@ -364,7 +371,7 @@
     var urgent = left != null && left < 15 * 60;
     var tasks = block.tasks.filter(function (t) { return t.tag !== "note" && (!t.monday || f.monday); });
     var done = tasks.filter(function (t) { return checks.indexOf(t.id) >= 0; }).length;
-    var phone = block.phone ? '<div class="phone glass">' + '<span class="well">' + phoneSvg(block.phone.mode) + "</span><div><p class=\"k\">Phone</p><p class=\"v\">" + esc(block.phone.label) + "</p></div></div>" : "";
+    var phone = block.phone ? '<div class="phone glass' + (phoneOn(block.phone.mode) ? " on" : "") + '">' + '<span class="well">' + phoneSvg(block.phone.mode) + "</span><div><p class=\"k\">Phone</p><p class=\"v\">" + esc(block.phone.label) + "</p></div></div>" : "";
     var rows = block.tasks.map(function (t) { return taskHtml({ monday: !!t.monday, due: t.due, id: t.id, tag: t.tag, text: t.text }, { monday: f.monday, clock: c.clock }, !c.preview, true); }).join("");
     return '<section class="card glass">' +
       (c.preview ? "" : '<div class="meter"><span id="meter" style="width:' + (progress(block, c.clock) * 100) + '%"></span></div>') +
@@ -405,7 +412,7 @@
         '<span class="name">' + esc(b.short) + "</span></button>";
     }).join("");
     document.getElementById("now").innerHTML = nowHtml(c);
-    document.getElementById("next").innerHTML = nextHtml(c) + calendarCard(c);
+    document.getElementById("next").innerHTML = calendarCard(c) + nextHtml(c);
     document.getElementById("tail").innerHTML =
       '<details><summary>Whole day <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary><div class="day glass">' +
       BLOCKS.map(function (b) {
@@ -447,9 +454,12 @@
       document.getElementById("live").textContent = "Now: " + name;
     }
     seen = id;
-    var match = clock.dateLabel.match(/^(.+), ([A-Za-z]+) (\d+)$/);
-    document.getElementById("date").textContent = match ? match[1] + ", " + (SHORT[match[2]] || match[2]) + " " + match[3] + " · " + clock.tz : clock.dateLabel;
-    document.getElementById("face").setAttribute("aria-label", clock.dateLabel);
+    var dayNum = String(Number(clock.ymd.slice(8, 10)));
+    var dayWk = document.getElementById("daywk");
+    var dayN = document.getElementById("daynum");
+    if (dayWk) dayWk.textContent = clock.weekday.toUpperCase();
+    if (dayN) dayN.textContent = dayNum;
+    document.getElementById("face").setAttribute("aria-label", clock.dateLabel + ", " + clock.weekday.toUpperCase() + " " + dayNum);
     var calKey = status + "|" + errorMsg + "|" + reason + "|" + connectNote + "|" + (data && data.notice || "") + "|" + events().map(function (ev) {
       return ev.id + (ev.team ? "t" : "") + (ev.start || ev.startDate || "");
     }).join(",");

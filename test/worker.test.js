@@ -36,6 +36,10 @@ test("the worker serves the bundled desk page", async () => {
   assert.match(html, /Do now/);
   assert.match(html, /Up next on calendar/);
   assert.match(html, /Exit check/);
+  assert.match(html, /function phoneOn\(mode\) \{\s*return mode === "on" \|\| mode === "finish";/);
+  assert.match(html, /phoneOn\(mode\) \? "#34c759"/);
+  assert.match(html, /Phone back on, finish-now only\./);
+  assert.equal(html.includes('id="date"'), false);
 
   const named = await worker.fetch(new Request(`${SITE}/index.html`), {});
   assert.equal(named.status, 200);
