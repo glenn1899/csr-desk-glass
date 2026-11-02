@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "csr-desk-glass",
+  "main": "src/index.js",
+  // Set this to today's date
+  "compatibility_date": "2026-11-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // The Worker routes /api and /auth, then serves index.html through ASSETS.
+    "run_worker_first": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "CAL_KV",
+      // Namespace name: csr-desk-glass-cal.
+      // Replace this placeholder with that namespace's id before any deploy.
+      "id": "PLACEHOLDER_csr-desk-glass-cal"
+    }
+  ]
+}

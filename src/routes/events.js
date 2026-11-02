@@ -1,4 +1,4 @@
-import { loadEvents } from "../_lib/schedule.js";
+import { loadEvents } from "../lib/schedule.js";
 
 const BASE_HEADERS = {
   "content-type": "application/json; charset=utf-8",

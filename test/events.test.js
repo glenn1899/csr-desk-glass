@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { onRequest } from "../functions/api/events.js";
-import { mapGoogleItems } from "../functions/_lib/google.js";
-import { ACCESS_KEY, CALENDAR_SCOPE, REFRESH_KEY } from "../functions/_lib/oauth.js";
-import { loadEvents } from "../functions/_lib/schedule.js";
+import { onRequest } from "../src/routes/events.js";
+import { mapGoogleItems } from "../src/lib/google.js";
+import { ACCESS_KEY, CALENDAR_SCOPE, REFRESH_KEY } from "../src/lib/oauth.js";
+import { loadEvents } from "../src/lib/schedule.js";
 
 const NOW = new Date("2026-11-02T15:00:00Z");
 
@@ -193,7 +193,7 @@ test("Google items from another zone are normalized before display", () => {
   assert.equal(event.end, "2026-07-01T13:00:00-04:00");
 });
 
-test("the Pages function serves sample JSON with a 30 second private cache", async () => {
+test("the worker route serves sample JSON with a 30 second private cache", async () => {
   const response = await onRequest({
     request: new Request("https://desk.example/api/events?token=ya29.not-a-setting"),
     env: {},

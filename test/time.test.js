@@ -5,7 +5,7 @@ import {
   formatInTimeZone,
   torontoWindow,
   zonedWallTimeToUtc,
-} from "../functions/_lib/time.js";
+} from "../src/lib/time.js";
 
 test("winter wall time in Toronto is UTC-5", () => {
   const instant = zonedWallTimeToUtc({ y: 2026, m: 1, d: 15, hh: 12, mm: 0, ss: 0 }, TORONTO);

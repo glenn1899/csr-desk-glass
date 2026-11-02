@@ -16,21 +16,23 @@ Times are converted to Eastern time (America/Toronto). A successful `/api/events
 
 1. In Google Cloud, create a project and enable the Google Calendar API.
 2. On the OAuth consent screen, choose External (or Internal if this is a Workspace account) and set the publishing status to **Testing**. Add the owner as a test user. The app only needs the read-only calendar scope.
-3. Create an OAuth client of type **Web application**. Under authorized redirect URIs, add exactly `https://<site-domain>/auth/callback`. Replace `<site-domain>` with the real site address, such as `desk.example.com`. The path is `/auth/callback`.
-4. In the Cloudflare Pages project, add these names. Use encrypted secrets for the client secret and for a refresh token if you set one by hand.
+3. Create an OAuth client of type **Web application**. Under authorized redirect URIs, add exactly `https://csr-desk-glass.glenn-889.workers.dev/auth/callback`.
+4. This site is the Cloudflare Worker named `csr-desk-glass`, not a Pages project. In that Worker’s settings, add these names. Use an encrypted secret for the client secret and for a refresh token if you set one by hand. `wrangler.jsonc` already declares the `CAL_KV` binding. Its id is a placeholder. Before any deploy, replace `PLACEHOLDER_csr-desk-glass-cal` with the id of the KV namespace named `csr-desk-glass-cal`.
 
 | Name | What it is |
 | --- | --- |
 | `GOOGLE_CLIENT_ID` | OAuth client id |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
 | `CALENDAR_ID` | Calendar to read. `primary` is allowed |
-| `CAL_KV` | KV binding. Create a KV namespace and bind it with this name |
+| `CAL_KV` | KV binding for the namespace `csr-desk-glass-cal` |
 | `GOOGLE_REFRESH_TOKEN` | Optional secret. Used only when `CAL_KV` has no refresh token |
 
 5. Turn on Cloudflare Access so only the owner’s email can open the site. The policy has to cover the page, `/api/*`, and `/auth/*`. The connect routes also refuse to run unless Access has identified the visitor.
-6. While signed in through Access, open `https://<site-domain>/auth/start` once. Google asks for offline read-only access. After you agree, the site saves the refresh token in `CAL_KV` and sends you back to the desk. The token is not shown.
+6. While signed in through Access, open `https://csr-desk-glass.glenn-889.workers.dev/auth/start` once. Google asks for offline read-only access. After you agree, the site saves the refresh token in `CAL_KV` and sends you back to the desk. The token is not shown.
 
-For local development, copy `.dev.vars.example` to `.dev.vars`. Leave the values blank to keep the sample calendar. `CAL_KV` is a binding, not a line in that file.
+The Worker script routes `/api/events`, `/auth/start`, and `/auth/callback`. Every other request, including the desk page, is served from the `public` folder through the `ASSETS` binding.
+
+For local development, copy `.dev.vars.example` to `.dev.vars` and run `npx wrangler dev`. Leave the values blank to keep the sample calendar. `CAL_KV` is a binding, not a line in that file. Local dev uses a simulated KV store and does not touch the live namespace.
 
 ## Tests
 

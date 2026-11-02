@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { onRequest as start } from "../functions/auth/start.js";
-import { onRequest as callback } from "../functions/auth/callback.js";
+import { onRequest as start } from "../src/routes/auth-start.js";
+import { onRequest as callback } from "../src/routes/auth-callback.js";
 import {
   ACCESS_KEY,
   CALENDAR_SCOPE,
   REFRESH_KEY,
   handleCallback,
-} from "../functions/_lib/oauth.js";
+} from "../src/lib/oauth.js";
 
 const OWNER = { "Cf-Access-Authenticated-User-Email": "owner@example.com" };
 

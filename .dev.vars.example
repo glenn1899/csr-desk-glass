@@ -1,4 +1,4 @@
-# Local secrets for `npx wrangler pages dev`.
+# Local secrets for `npx wrangler dev`.
 # Copy this file to .dev.vars. .dev.vars is gitignored. Do not commit real values.
 # Leave everything blank to preview with sample events.
 #
