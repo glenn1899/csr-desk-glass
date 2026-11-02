@@ -593,10 +593,26 @@
   requestAnimationFrame(hands);
   try {
     var params = new URLSearchParams(window.location.search);
+    var connectErrors = {
+      invalid_request: "Could not connect the calendar (invalid_request).",
+      invalid_client: "Could not connect the calendar (invalid_client).",
+      invalid_grant: "Could not connect the calendar (invalid_grant).",
+      unauthorized_client: "Could not connect the calendar (unauthorized_client).",
+      unsupported_grant_type: "Could not connect the calendar (unsupported_grant_type).",
+      invalid_scope: "Could not connect the calendar (invalid_scope).",
+      redirect_uri_mismatch: "Could not connect the calendar (redirect_uri_mismatch).",
+      access_denied: "Could not connect the calendar (access_denied)."
+    };
     if (params.get("calendar") === "connected") connectNote = "Calendar connected.";
-    if (params.get("calendar") === "error") connectNote = "Could not connect the calendar. Try again.";
+    if (params.get("calendar") === "error") {
+      var connectCode = params.get("reason");
+      connectNote = Object.prototype.hasOwnProperty.call(connectErrors, connectCode)
+        ? connectErrors[connectCode]
+        : "Could not connect the calendar. Try again.";
+    }
     if (params.has("calendar")) {
       params.delete("calendar");
+      params.delete("reason");
       var query = params.toString();
       history.replaceState(null, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
     }
