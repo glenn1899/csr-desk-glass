@@ -135,6 +135,13 @@
   .hero { padding: 2.5rem 1.75rem; border-radius: 28px; }
   .hero h2 { margin: .5rem 0 0; font-size: 3rem; line-height: 1; letter-spacing: -.03em; }
   .hero p { color: #6e6e73; font-size: 1.125rem; }
+  .eyebrow { margin: 0; font-size: 13px; font-weight: 500; color: #86868b; }
+  .note { margin-bottom: 1.25rem; border-radius: 22px; padding: .85rem 1rem; font-size: .875rem; color: #3a3a3c; }
+  .loc { margin: .75rem 0 0; font-size: 15px; color: #3a3a3c; overflow-wrap: anywhere; }
+  .retry { margin-top: 1.25rem; min-height: 2.75rem; border-radius: 999px; background: #1d1d1f; color: #fff; padding: 0 1rem; font-weight: 500; }
+  h2.title, .next h2, .day .ttl { overflow-wrap: anywhere; }
+  .rail .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #next:empty { display: none; }
   .tick { width: 3.5rem; height: 3.5rem; display: grid; place-items: center; border-radius: 999px; background: #34c759; color: #fff; }
   @media (min-width: 1024px) {
     .top, .board { grid-template-columns: minmax(0,1.7fr) minmax(16rem,.85fr); column-gap: 2rem; }
@@ -143,6 +150,10 @@
     h2.title { font-size: 3.75rem; }
     .next { position: sticky; top: 1.5rem; }
     .pad { padding: 2rem; }
+    .board:has(#next:empty) { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .hero h2 { font-size: 2.25rem; }
   }
   @keyframes pop { 0% { transform: scale(.82); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
 </style>
@@ -154,7 +165,7 @@
   <div class="top">
     <div>
       <h1>CSR Desk</h1>
-      <nav class="rail" id="rail" aria-label="Day blocks"></nav>
+      <nav class="rail" id="rail" aria-label="Today"></nav>
     </div>
     <div class="clock-col">
       <div id="face" role="img" aria-label="Eastern time">
@@ -188,47 +199,21 @@
     <div id="next"></div>
   </div>
   <div id="tail"></div>
-  <p class="fine">Sheet updated Oct 29, 2026. Eastern time.</p>
+  <p class="fine" id="fine">Eastern time.</p>
 </main>
 <script>
 (function () {
-  var EXIT = "Inbox and voicemail at zero, or every open item has an owner and a deadline.";
-  var TAG = { do: "Do now", resolve: "Resolve", batch: "Batch", park: "Park", note: "Note" };
+  var REFRESH_MS = 3 * 60 * 1000;
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var SHORT = { January:"Jan", February:"Feb", March:"Mar", April:"Apr", May:"May", June:"Jun", July:"Jul", August:"Aug", September:"Sep", October:"Oct", November:"Nov", December:"Dec" };
-  var BLOCKS = [
-    { id:"before", start:0, end:570, from:480, window:"Before 9:30", title:"Onboarding review", short:"Open", manager:true, phone:null, tasks:[
-      { id:"before-abeyance", tag:"do", text:"Check the abeyance list. Flag anything overdue." },
-      { id:"before-claims", tag:"do", text:"Export the claims report by insurer.", monday:true, due:540 }
-    ]},
-    { id:"morning", start:570, end:630, window:"9:30–10:30", title:"Morning batch", short:"Morning", phone:{ mode:"off", label:"No phone." }, tasks:[
-      { id:"morning-clear", tag:"do", text:"Clear overnight voicemail and email. Glance at the claims list for anything stalled. Knock out anything due today." },
-      { id:"morning-resolve", tag:"resolve", text:"By 10:30, every item has an answer: call back now, file with a note, or promise a time." }
-    ]},
-    { id:"midday", start:630, end:870, window:"10:30–2:30", title:"Midday block", short:"Midday", phone:{ mode:"finish", label:"Phone on, finish-now only." }, tasks:[
-      { id:"midday-now", tag:"do", text:"ID cards, proof of insurance, claim status, simple changes." },
-      { id:"midday-batch", tag:"batch", text:"60-day renewal emails batched here. Emails and texts outside 30 days go out as heads-up notices." },
-      { id:"midday-park", tag:"park", text:"More than a quick fix (about 2 minutes or more)? Park it with a promised time." },
-      { id:"midday-resolve", tag:"resolve", text:"Triage rule: park longer work to the 2:30–3:30 protected block, where those tasks are batched." }
-    ]},
-    { id:"protected", start:870, end:930, window:"2:30–3:30", title:"Protected block", short:"Protected", phone:{ mode:"overflow", label:"Phone to overflow and voicemail." }, tasks:[
-      { id:"protected-renewals", tag:"do", text:"First: renewal calls for policies renewing within 30 days." },
-      { id:"protected-batch", tag:"batch", text:"Then parked work: endorsements, file admin." }
-    ]},
-    { id:"agency", start:930, end:940, window:"3:30–3:40", title:"Agency-bill mini-block", short:"Agency bill", phone:{ mode:"on", label:"Phone on." }, tasks:[
-      { id:"agency-remind", tag:"do", text:"Send payment-due reminders on agency-bill accounts. A lapse is the one thing a later call can’t undo." },
-      { id:"agency-note", tag:"note", text:"Call, text, or email, depending on the collections-reminder stage." }
-    ]},
-    { id:"afternoon", start:940, end:1020, window:"3:40–5:00", title:"Afternoon phones", short:"Afternoon", phone:{ mode:"finish", label:"Phone back on, finish-now only." }, tasks:[
-      { id:"afternoon-overflow", tag:"do", text:"Clear the overflow." },
-      { id:"afternoon-abeyance", tag:"do", text:"Export abeyance reports before the end of the day." },
-      { id:"afternoon-park", tag:"park", text:"Before you leave, every open item gets an owner and a time." }
-    ]}
-  ];
+  var data = null;
+  var status = "loading";
+  var errorMsg = "";
   var preview = null;
-  var checks = [];
-  var ymd = "";
   var sig = "";
   var seen = undefined;
+  var pullGen = 0;
+  var fetchedAt = 0;
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -257,157 +242,175 @@
       tz: part(parts, "timeZoneName") || "ET"
     };
   }
-  function liveId(c) {
-    if (c.weekday === "Sat" || c.weekday === "Sun") return null;
-    for (var i = 0; i < BLOCKS.length; i++) if (c.minutes >= BLOCKS[i].start && c.minutes < BLOCKS[i].end) return BLOCKS[i].id;
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function torontoYmd(date) { return clockOf(date).ymd; }
+  function shortDate(ymd) {
+    var p = String(ymd || "").split("-");
+    if (p.length < 3) return "";
+    return MONTHS[Number(p[1]) - 1] + " " + Number(p[2]);
+  }
+  function dayBefore(ymd) {
+    var p = ymd.split("-");
+    var dt = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] - 1));
+    return dt.getUTCFullYear() + "-" + pad(dt.getUTCMonth() + 1) + "-" + pad(dt.getUTCDate());
+  }
+  function formatTime(date) {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Toronto", hour: "numeric", minute: "2-digit"
+    }).format(date);
+  }
+  function allDayLabel(ev) {
+    var last = dayBefore(ev.endDate);
+    if (!last || last === ev.startDate) return "All day";
+    return "All day · " + shortDate(ev.startDate) + " – " + shortDate(last);
+  }
+  function formatWindow(ev) {
+    if (ev.allDay) return allDayLabel(ev);
+    var start = new Date(ev.start);
+    var end = new Date(ev.end);
+    var text = formatTime(start) + " – " + formatTime(end);
+    if (torontoYmd(start) !== torontoYmd(end)) text += " " + shortDate(torontoYmd(end));
+    return text;
+  }
+  function usable(ev) {
+    if (!ev || !ev.id || !ev.title) return false;
+    if (ev.allDay) return !!ev.startDate && !!ev.endDate;
+    var start = new Date(ev.start).getTime();
+    var end = new Date(ev.end).getTime();
+    return !isNaN(start) && !isNaN(end) && end > start;
+  }
+  function events() {
+    return data && Array.isArray(data.events) ? data.events.filter(usable) : [];
+  }
+  function onDay(ev, ymd) {
+    if (ev.allDay) return ev.startDate <= ymd && ymd < ev.endDate;
+    var start = torontoYmd(new Date(ev.start));
+    var end = torontoYmd(new Date(new Date(ev.end).getTime() - 1));
+    return start <= ymd && ymd <= end;
+  }
+  function isCurrent(ev, now) {
+    if (!ev || ev.allDay) return false;
+    var t = now.getTime();
+    return new Date(ev.start).getTime() <= t && t < new Date(ev.end).getTime();
+  }
+  function pickCurrent(list, now) {
+    var hits = list.filter(function (ev) { return isCurrent(ev, now); });
+    hits.sort(function (a, b) {
+      return new Date(b.start) - new Date(a.start) || (new Date(a.end) - new Date(a.start)) - (new Date(b.end) - new Date(b.start));
+    });
+    return hits[0] || null;
+  }
+  function pickNext(list, now) {
+    var t = now.getTime();
+    var hits = list.filter(function (ev) { return !ev.allDay && new Date(ev.start).getTime() > t; });
+    hits.sort(function (a, b) { return new Date(a.start) - new Date(b.start); });
+    return hits[0] || null;
+  }
+  function byId(list, id) {
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
     return null;
   }
-  function focusFor(c) {
-    if (preview) {
-      for (var i = 0; i < BLOCKS.length; i++) if (BLOCKS[i].id === preview) {
-        var mon = c.weekday === "Mon";
-        return { kind:"block", block: BLOCKS[i], next: BLOCKS[i + 1] || null, later: false, monday: mon };
-      }
+  function afterEvent(list, event) {
+    var start = event.allDay ? event.startDate + "T99" : event.start;
+    var next = null;
+    for (var i = 0; i < list.length; i++) {
+      var ev = list[i];
+      if (ev.allDay || ev.id === event.id) continue;
+      if (ev.start > start && (!next || ev.start < next.start)) next = ev;
     }
-    if (c.weekday === "Sat" || c.weekday === "Sun") return { kind:"weekend", block:null, next:null, later:true, monday:false };
-    for (var j = 0; j < BLOCKS.length; j++) {
-      if (c.minutes >= BLOCKS[j].start && c.minutes < BLOCKS[j].end) {
-        var nxt = BLOCKS[j + 1] || null;
-        return { kind:"block", block: BLOCKS[j], next: nxt, later: !nxt, monday: c.weekday === "Mon" };
-      }
-    }
-    return { kind:"closed", block:null, next:null, later:true, monday:false };
+    return next;
   }
-  function until(min, c) { return (min - c.minutes) * 60 - c.seconds; }
   function spanText(total) {
-    var sec = Math.max(0, total), h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    var sec = Math.max(0, Math.floor(total)), h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
     if (sec < 15 * 60) return m + "m " + (s < 10 ? "0" : "") + s + "s";
     if (h > 0) return m > 0 ? h + "h " + m + "m" : h + "h";
     return m + "m";
   }
-  function progress(block, c) {
-    var origin = block.from == null ? block.start : block.from;
-    if (c.minutes < origin) return 0;
-    var span = (block.end - origin) * 60;
-    if (span <= 0) return 1;
-    return Math.max(0, Math.min(1, ((c.minutes - origin) * 60 + c.seconds) / span));
+  function progress(ev, now) {
+    var start = new Date(ev.start).getTime();
+    var end = new Date(ev.end).getTime();
+    var span = end - start;
+    if (span <= 0) return 0;
+    return Math.max(0, Math.min(1, (now.getTime() - start) / span));
   }
-  function waitSpan(next) {
-    var i = BLOCKS.indexOf(next), prev = i > 0 ? BLOCKS[i - 1] : null;
-    if (!prev) return Math.max(60, next.start * 60);
-    var origin = prev.from == null ? prev.start : prev.from;
-    return Math.max(60, (next.start - origin) * 60);
-  }
-  function load(day) {
-    try {
-      var raw = localStorage.getItem("csr-desk-glass-checks");
-      if (!raw) return [];
-      var parsed = JSON.parse(raw);
-      if (!parsed || parsed.ymd !== day || !Array.isArray(parsed.ids)) return [];
-      return parsed.ids;
-    } catch (e) { return []; }
-  }
-  function save(day) {
-    localStorage.setItem("csr-desk-glass-checks", JSON.stringify({ ymd: day, ids: checks }));
-  }
-  function phoneSvg(mode) {
-    var color = mode === "off" || mode === "overflow" ? "#ff3b30" : mode === "on" ? "#34c759" : "#1d1d1f";
-    if (mode === "overflow") return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="' + color + '" stroke-width="1.75"><circle cx="6" cy="12" r="3.2"/><circle cx="18" cy="12" r="3.2"/><path d="M6 15.2h12"/></svg>';
-    var slash = mode === "off" ? '<path d="M4 4l16 16"/>' : "";
-    return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="' + color + '" stroke-width="1.75" stroke-linecap="round"><path d="M7 3.5h2.2l1.2 3-1.6 1a12 12 0 0 0 5.7 5.7l1-1.6 3 1.2V15a2 2 0 0 1-2.2 2A15 15 0 0 1 5 6.7 2 2 0 0 1 7 3.5z"/>' + slash + '</svg>';
-  }
-  function checkSvg(on) {
-    return '<span class="box' + (on ? " on" : "") + '"><svg viewBox="0 0 16 16"><path d="M3.2 8.2 L6.5 11.2 L12.8 4.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="stroke-dasharray:16;stroke-dashoffset:' + (on ? 0 : 16) + ';transition:stroke-dashoffset 180ms ease-out"/></svg></span>';
-  }
-  function taskHtml(task, c, live, interactive) {
-    var inactive = task.monday && !c.monday;
-    var on = checks.indexOf(task.id) >= 0;
-    var late = live && c.monday && task.due != null && !on && c.clock.minutes >= task.due;
-    var box = interactive
-      ? '<button class="hit" type="button" data-check="' + task.id + '" role="checkbox" aria-checked="' + on + '" aria-label="' + esc(task.text) + '">' + checkSvg(on) + "</button>"
-      : '<span class="hit">' + checkSvg(false) + "</span>";
-    var due = task.due != null ? '<p class="due' + (late ? " late" : "") + '">' + (late ? "This was due before 9:00." : "Due before 9:00.") + "</p>" : "";
-    return '<li class="task' + (inactive ? " off" : "") + '">' + box +
-      '<span class="chip' + (task.tag === "do" && !inactive ? " do" : "") + '">' + esc(inactive ? "Mon" : TAG[task.tag]) + "</span>" +
-      '<div><p class="' + (on ? "done" : "") + '">' + esc(task.text) + "</p>" + due + "</div></li>";
-  }
-  function nowHtml(c) {
-    var f = c.focus, block = f.block;
-    if (f.kind === "weekend") {
-      return '<section class="hero glass"><p style="margin:0;font-size:13px;font-weight:500;color:#86868b">Weekend</p><h2>Office closed</h2><p>No blocks today.</p></section>';
+  function remainFrac(ev, now, current) {
+    var remain = Math.max(0, (new Date(ev.start).getTime() - now.getTime()) / 1000);
+    var span = 2 * 60 * 60;
+    if (current && !current.allDay) {
+      span = Math.max(60, (new Date(ev.start).getTime() - new Date(current.start).getTime()) / 1000);
     }
-    if (f.kind !== "block" || !block) {
-      return '<section class="hero glass"><div class="tick"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#fff" stroke-width="2.5"><path d="M5 12.5 9.5 17 19 7"/></svg></div><h2>Done</h2><p>No blocks left today.</p><p class="exit"><b style="color:#1d1d1f">Exit check. </b>' + esc(EXIT) + "</p></section>";
-    }
-    var left = c.preview ? null : until(block.end, c.clock);
+    return { remain: remain, frac: Math.min(1, remain / span) };
+  }
+  function sourceLabel() {
+    if (!data) return "";
+    if (data.source === "sample") return "Sample data";
+    if (data.source === "google") return "Google Calendar";
+    if (data.source === "ics") return "Calendar feed";
+    return "";
+  }
+  function fineText() {
+    var bits = ["Eastern time"];
+    var label = sourceLabel();
+    if (label) bits.push(label);
+    if (data && data.generatedAt) bits.push("Updated " + formatTime(new Date(data.generatedAt)));
+    return bits.join(" · ");
+  }
+  function hero(kicker, title, copy, extra) {
+    return '<section class="hero glass"><p class="eyebrow">' + esc(kicker) + "</p><h2>" + esc(title) + "</h2><p>" + esc(copy) + "</p>" + (extra || "") + "</section>";
+  }
+  function eventCard(ev, now, live) {
+    var left = live ? Math.round((new Date(ev.end).getTime() - now.getTime()) / 1000) : null;
     var urgent = left != null && left < 15 * 60;
-    var tasks = block.tasks.filter(function (t) { return t.tag !== "note" && (!t.monday || f.monday); });
-    var done = tasks.filter(function (t) { return checks.indexOf(t.id) >= 0; }).length;
-    var phone = block.phone ? '<div class="phone glass">' + '<span class="well">' + phoneSvg(block.phone.mode) + "</span><div><p class=\"k\">Phone</p><p class=\"v\">" + esc(block.phone.label) + "</p></div></div>" : "";
-    var rows = block.tasks.map(function (t) { return taskHtml({ monday: !!t.monday, due: t.due, id: t.id, tag: t.tag, text: t.text }, { monday: f.monday, clock: c.clock }, !c.preview, true); }).join("");
+    var loc = ev.location ? '<p class="loc">' + esc(ev.location) + "</p>" : "";
     return '<section class="card glass">' +
-      (c.preview ? "" : '<div class="meter"><span id="meter" style="width:' + (progress(block, c.clock) * 100) + '%"></span></div>') +
-      '<div class="pad"><div class="row"><p class="pill now-kicker">' + (c.preview ? "Preview" : "Now") + "</p>" +
+      (live ? '<div class="meter"><span id="meter" style="width:' + (progress(ev, now) * 100) + '%"></span></div>' : "") +
+      '<div class="pad"><div class="row"><p class="pill now-kicker">' + (live ? "Now" : "Preview") + "</p>" +
       (left == null ? "" : '<p class="pill left' + (urgent ? " urgent" : "") + '" id="left">' + (left <= 0 ? "Ending" : spanText(left) + " left") + "</p>") +
-      "</div><h2 class=\"title\">" + esc(block.title) + "</h2>" +
-      '<p class="pill window">' + esc(block.window) + "</p>" +
-      (block.manager ? '<p class="manager">Manager</p>' : "") +
-      phone + '<ul class="tasks glass">' + rows + "</ul>" +
-      (tasks.length ? '<p class="count" id="count">' + (done === tasks.length ? "Clear" : done + " of " + tasks.length) + "</p>" : "") +
-      (block.id === "afternoon" ? '<p class="exit"><b style="color:#1d1d1f">Exit check. </b>' + esc(EXIT) + "</p>" : "") +
-      "</div></section>";
+      '</div><h2 class="title">' + esc(ev.title) + "</h2>" +
+      '<p class="pill window">' + esc(formatWindow(ev)) + "</p>" + loc + "</div></section>";
   }
-  function nextHtml(c) {
-    var block = c.focus.next;
-    if (!block || c.focus.later) return "";
-    var remain = c.preview ? null : Math.max(0, until(block.start, c.clock));
-    var frac = remain == null ? 0 : Math.min(1, remain / waitSpan(block));
-    var items = block.tasks.map(function (t) {
-      var inactive = t.monday && !c.focus.monday;
-      return "<li><b>" + esc(inactive ? "Mon" : TAG[t.tag]) + "</b><span style=\"display:block\">" + esc(t.text) + "</span></li>";
-    }).join("");
+  function freeHtml(next, allDay) {
+    var hint = next ? "Next up at " + formatTime(new Date(next.start)) + "." : "Nothing else coming up.";
+    var extra = allDay.length ? "<p>" + allDay.map(function (ev) { return esc(ev.title); }).join(" · ") + "</p>" : "";
+    return hero("Open", "Free right now", hint, extra);
+  }
+  function nextHtml(ev, now, current, showRemain) {
+    if (!ev) return "";
+    var remain = null;
+    var frac = 0;
+    if (showRemain && !ev.allDay) {
+      var gap = remainFrac(ev, now, current);
+      remain = gap.remain;
+      frac = gap.frac;
+    }
+    var loc = ev.location ? '<p class="meta">' + esc(ev.location) + "</p>" : "";
     return '<aside class="next glass"><p class="kicker">Up next</p>' +
       (remain == null ? "" : '<div class="remain"><div class="track"><span id="remain" style="width:' + (frac * 100) + '%"></span></div><b id="remain-label">' + spanText(remain) + "</b></div>") +
-      "<h2>" + esc(block.title) + "</h2><p class=\"meta\">" + esc(block.window) + "</p>" +
-      (block.phone ? '<p class="meta">' + esc(block.phone.label) + "</p>" : "") +
-      "<ul>" + items + "</ul></aside>";
+      "<h2>" + esc(ev.title) + "</h2><p class=\"meta\">" + esc(formatWindow(ev)) + "</p>" + loc + "</aside>";
   }
-  function paintStructure(c) {
-    var live = liveId(c.clock);
-    document.getElementById("banner").innerHTML = c.preview && c.focus.block
-      ? '<div class="banner"><p>Previewing ' + esc(c.focus.block.window) + ".</p><button type=\"button\" id=\"back\">Back</button></div>" : "";
-    document.getElementById("rail").innerHTML = BLOCKS.map(function (b) {
-      var past = c.clock.weekday !== "Sat" && c.clock.weekday !== "Sun" && c.clock.minutes >= b.end;
-      var on = c.focus.block && c.focus.block.id === b.id;
-      return '<button type="button" data-pick="' + b.id + '" aria-pressed="' + on + '"' + (past && !on ? ' class="past"' : "") + ">" +
-        '<span class="win">' + (b.id === live ? '<span class="dot"></span>' : "") + esc(b.window) + "</span>" +
-        '<span class="name">' + esc(b.short) + "</span></button>";
+  function agendaHtml(list, now) {
+    if (!list.length) return "";
+    var shown = list.slice(0, 30);
+    var rows = shown.map(function (ev) {
+      var live = isCurrent(ev, now);
+      var when = ev.allDay ? "All day" : formatTime(new Date(ev.start));
+      var sub = ev.location || (ev.allDay ? shortDate(ev.startDate) : shortDate(torontoYmd(new Date(ev.start))));
+      return '<button type="button" data-pick="' + esc(ev.id) + '"><span class="mark' + (live ? " live" : "") + '"></span><span class="when">' + esc(when) + '</span><span><span class="ttl">' + esc(ev.title) + (live ? " · now" : "") + '</span><span class="sub">' + esc(sub) + "</span></span></button>";
     }).join("");
-    document.getElementById("now").innerHTML = nowHtml(c);
-    document.getElementById("next").innerHTML = nextHtml(c);
-    document.getElementById("tail").innerHTML =
-      '<details><summary>Whole day <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary><div class="day glass">' +
-      BLOCKS.map(function (b) {
-        var on = c.focus.block && c.focus.block.id === b.id;
-        return '<button type="button" data-pick="' + b.id + '"><span class="mark' + (b.id === live ? " live" : "") + '"></span><span class="when">' + esc(b.window) + '</span><span><span class="ttl">' + esc(b.title) + (b.id === live ? " · now" : on && c.preview ? " · preview" : "") + "</span>" + (b.phone ? '<span class="sub">' + esc(b.phone.label) + "</span>" : "") + "</span></button>";
-      }).join("") +
-      '<p class="foot"><b style="color:#1d1d1f">Exit check. </b>' + esc(EXIT) + "</p></div></details>";
+    var more = list.length > shown.length ? '<p class="foot">' + (list.length - shown.length) + " more in the next two weeks.</p>" : "";
+    return '<details><summary>On the calendar <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary><div class="day glass">' + rows + more + "</div></details>";
+  }
+  function wire() {
     var back = document.getElementById("back");
     if (back) back.onclick = function () { preview = null; sig = ""; render(); };
+    var retry = document.getElementById("retry");
+    if (retry) retry.onclick = function () { pull(); };
     Array.prototype.forEach.call(document.querySelectorAll("[data-pick]"), function (btn) {
       btn.onclick = function () {
         var id = btn.getAttribute("data-pick");
-        preview = preview === id || id === live ? null : id;
-        sig = "";
-        render();
-      };
-    });
-    Array.prototype.forEach.call(document.querySelectorAll("[data-check]"), function (btn) {
-      btn.onclick = function () {
-        var id = btn.getAttribute("data-check");
-        var i = checks.indexOf(id);
-        if (i >= 0) checks.splice(i, 1); else checks.push(id);
-        save(ymd);
+        var list = events();
+        var current = pickCurrent(list, new Date());
+        preview = preview === id || (current && id === current.id) ? null : id;
         sig = "";
         render();
       };
@@ -416,38 +419,121 @@
   function render() {
     var now = new Date();
     var clock = clockOf(now);
-    if (clock.ymd !== ymd) { ymd = clock.ymd; checks = load(ymd); sig = ""; }
-    var focus = focusFor(clock);
-    var id = liveId(clock);
-    if (seen !== undefined && seen !== id && !preview) {
-      var name = id ? BLOCKS.filter(function (b) { return b.id === id; })[0].title : "Done for today";
+    var list = events();
+    if (preview && !byId(list, preview)) preview = null;
+    var current = status === "ready" || data ? pickCurrent(list, now) : null;
+    var focus = preview ? byId(list, preview) : current;
+    var upcoming = preview && focus ? afterEvent(list, focus) : pickNext(list, now);
+    var name = current ? current.title : (status === "ready" ? "Free right now" : "");
+    if (seen !== undefined && seen !== name && !preview && name) {
       document.getElementById("live").textContent = "Now: " + name;
     }
-    seen = id;
+    seen = name;
     var match = clock.dateLabel.match(/^(.+), ([A-Za-z]+) (\d+)$/);
     document.getElementById("date").textContent = match ? match[1] + ", " + (SHORT[match[2]] || match[2]) + " " + match[3] + " · " + clock.tz : clock.dateLabel;
     document.getElementById("face").setAttribute("aria-label", clock.dateLabel);
-    var nextSig = ymd + "|" + (preview || "") + "|" + checks.join(",") + "|" + focus.kind + "|" + (focus.block ? focus.block.id : "");
-    if (nextSig !== sig) {
-      sig = nextSig;
-      paintStructure({ clock: clock, focus: focus, preview: preview });
-    } else if (focus.block && !preview) {
-      var meter = document.getElementById("meter");
-      if (meter) meter.style.width = (progress(focus.block, clock) * 100) + "%";
-      var left = document.getElementById("left");
-      if (left) {
-        var sec = until(focus.block.end, clock);
-        left.textContent = sec <= 0 ? "Ending" : spanText(sec) + " left";
-        left.className = "pill left" + (sec < 15 * 60 ? " urgent" : "");
+    document.getElementById("fine").textContent = fineText();
+    var today = list.filter(function (ev) { return onDay(ev, clock.ymd); }).slice(0, 20);
+    var allDay = today.filter(function (ev) { return ev.allDay; });
+    var eventKey = list.map(function (ev) { return ev.id + ev.title + (ev.start || ev.startDate) + (ev.end || ev.endDate); }).join(",");
+    var nextSig = [status, errorMsg, preview || "", clock.ymd, data && data.source || "", current && current.id || "", upcoming && upcoming.id || "", eventKey].join("|");
+    if (nextSig === sig) {
+      if ((status === "ready" || data) && !preview && current) {
+        var meter = document.getElementById("meter");
+        if (meter) meter.style.width = (progress(current, now) * 100) + "%";
+        var left = document.getElementById("left");
+        if (left) {
+          var sec = Math.round((new Date(current.end).getTime() - now.getTime()) / 1000);
+          left.textContent = sec <= 0 ? "Ending" : spanText(sec) + " left";
+          left.className = "pill left" + (sec < 15 * 60 ? " urgent" : "");
+        }
       }
-      if (focus.next && !focus.later) {
-        var remain = Math.max(0, until(focus.next.start, clock));
+      if ((status === "ready" || data) && !preview && upcoming && !upcoming.allDay) {
+        var gap = remainFrac(upcoming, now, current);
         var bar = document.getElementById("remain");
         var label = document.getElementById("remain-label");
-        if (bar) bar.style.width = (Math.min(1, remain / waitSpan(focus.next)) * 100) + "%";
-        if (label) label.textContent = spanText(remain);
+        if (bar) bar.style.width = (gap.frac * 100) + "%";
+        if (label) label.textContent = spanText(gap.remain);
       }
+      return;
     }
+    sig = nextSig;
+    var banner = "";
+    if (preview && focus) {
+      banner = '<div class="banner"><p>Previewing ' + esc(focus.title) + '.</p><button type="button" id="back">Back</button></div>';
+    } else if (data && data.source === "sample" && data.notice && status !== "loading") {
+      banner = '<div class="note glass" role="status">' + esc(data.notice) + "</div>";
+    } else if (status === "error" && data) {
+      banner = '<div class="note glass" role="status">' + esc(errorMsg) + "</div>";
+    }
+    document.getElementById("banner").innerHTML = banner;
+    var nowHtml = "";
+    var nextBlock = "";
+    var tail = "";
+    if (!data && status === "loading") {
+      nowHtml = hero("Calendar", "Loading", "Checking today's events.");
+    } else if (!data && status === "error") {
+      nowHtml = hero("Calendar", "Unavailable", errorMsg, '<button class="retry" type="button" id="retry">Try again</button>');
+    } else if (!list.length) {
+      nowHtml = hero("Calendar", "Nothing scheduled", "No events today or in the next two weeks.");
+    } else if (focus) {
+      nowHtml = eventCard(focus, now, !preview && focus === current);
+      nextBlock = nextHtml(upcoming, now, current, !preview);
+      tail = agendaHtml(list, now);
+    } else {
+      nowHtml = freeHtml(upcoming, allDay);
+      nextBlock = nextHtml(upcoming, now, null, !preview);
+      tail = agendaHtml(list, now);
+    }
+    document.getElementById("rail").innerHTML = today.map(function (ev) {
+      var past = !ev.allDay && new Date(ev.end).getTime() <= now.getTime();
+      var on = focus && focus.id === ev.id && (preview || ev === current);
+      var label = ev.allDay ? "All day" : formatTime(new Date(ev.start));
+      return '<button type="button" data-pick="' + esc(ev.id) + '" aria-pressed="' + !!on + '"' + (past && !on ? ' class="past"' : "") + ">" +
+        '<span class="win">' + (current && ev.id === current.id ? '<span class="dot"></span>' : "") + esc(label) + "</span>" +
+        '<span class="name">' + esc(ev.title) + "</span></button>";
+    }).join("");
+    document.getElementById("now").innerHTML = nowHtml;
+    document.getElementById("next").innerHTML = nextBlock;
+    document.getElementById("tail").innerHTML = tail;
+    wire();
+  }
+  function safeError(body) {
+    var msg = body && typeof body.error === "string" ? body.error : "";
+    if (!msg || msg.length > 180 || /https?:|token|secret|ya29|@/i.test(msg)) {
+      return "The calendar didn't load. Trying again shortly.";
+    }
+    return msg;
+  }
+  function pull() {
+    var gen = ++pullGen;
+    fetch("/api/events", { headers: { accept: "application/json" }, cache: "no-store" })
+      .then(function (res) {
+        return res.text().then(function (text) {
+          try { return JSON.parse(text); } catch (e) { return null; }
+        });
+      })
+      .then(function (body) {
+        if (gen !== pullGen) return;
+        if (!body || body.ok !== true || !Array.isArray(body.events)) {
+          status = "error";
+          errorMsg = safeError(body);
+        } else {
+          status = "ready";
+          data = body;
+          errorMsg = "";
+          fetchedAt = Date.now();
+        }
+        sig = "";
+        render();
+      })
+      .catch(function () {
+        if (gen !== pullGen) return;
+        status = "error";
+        errorMsg = "The calendar didn't load. Trying again shortly.";
+        sig = "";
+        render();
+      });
   }
   var ticks = document.getElementById("ticks");
   for (var n = 0; n < 60; n++) {
@@ -486,8 +572,16 @@
   }
   requestAnimationFrame(hands);
   render();
-  setInterval(render, 1000);
+  pull();
+  setInterval(function () {
+    if (document.visibilityState === "hidden") return;
+    pull();
+  }, REFRESH_MS);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && Date.now() - fetchedAt > 2 * 60 * 1000) pull();
+  });
 })();
 </script>
+
 </body>
 </html>

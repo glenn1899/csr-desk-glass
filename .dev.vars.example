@@ -1,0 +1,13 @@
+# Local secrets for `npx wrangler pages dev`.
+# Copy this file to .dev.vars and fill in one mode.
+# .dev.vars is gitignored. Do not commit real values.
+# Leave everything blank to preview with sample events.
+
+# Mode A. Secret iCal address from Google Calendar settings.
+# ICS_URL=""
+
+# Mode B. Google Calendar API, read-only. Used only when ICS_URL is empty.
+# GOOGLE_CLIENT_ID=""
+# GOOGLE_CLIENT_SECRET=""
+# GOOGLE_REFRESH_TOKEN=""
+# CALENDAR_ID="primary"
