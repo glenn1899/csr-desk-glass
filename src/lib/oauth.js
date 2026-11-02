@@ -5,6 +5,16 @@ export const ACCESS_KEY = "google_access_token";
 const STATE_COOKIE = "cal_oauth_state";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const TOKEN_ERROR_CODES = new Set([
+  "invalid_request",
+  "invalid_client",
+  "invalid_grant",
+  "unauthorized_client",
+  "unsupported_grant_type",
+  "invalid_scope",
+  "redirect_uri_mismatch",
+  "access_denied",
+]);
 
 export function handleStart(request, env) {
   if (request.method.toUpperCase() !== "GET") return methodNotAllowed();
@@ -47,9 +57,14 @@ export async function handleCallback(request, env, fetchImpl = fetch) {
   let tokens;
   try {
     tokens = await exchangeCode(request, env, incoming.searchParams.get("code"), fetchImpl);
-  } catch {
-    console.log(JSON.stringify({ level: "error", message: "calendar_connect_failed" }));
-    return redirect(doneUrl(request, "error"), [clear]);
+  } catch (err) {
+    const status = err && Number.isInteger(err.status) ? err.status : 0;
+    const code = safeErrorCode(err && err.code);
+    const line = { level: "error", message: "calendar_connect_failed" };
+    if (status >= 400 && status <= 599) line.status = status;
+    if (code) line.error = code;
+    console.log(JSON.stringify(line));
+    return redirect(doneUrl(request, "error", code), [clear]);
   }
   if (!tokens.refreshToken || !scopeIsCalendarReadonly(tokens.scope)) {
     console.log(JSON.stringify({ level: "error", message: "calendar_connect_rejected" }));
@@ -104,21 +119,24 @@ async function exchangeCode(request, env, code, fetchImpl) {
       redirect: "error",
       referrerPolicy: "no-referrer",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      // Same redirect_uri as /auth/start. Google rejects the exchange when they differ.
       body: new URLSearchParams({
         code: String(code),
         client_id: String(env.GOOGLE_CLIENT_ID).trim(),
         client_secret: String(env.GOOGLE_CLIENT_SECRET).trim(),
         redirect_uri: callbackUrl(request),
         grant_type: "authorization_code",
-      }),
+      }).toString(),
       signal: AbortSignal.timeout(8000),
     });
   } catch {
     throw new Error("Google authorization failed.");
   }
   if (!response.ok) {
-    try { await response.text(); } catch { /* discard */ }
-    throw new Error("Google authorization failed.");
+    const failure = new Error("Google authorization failed.");
+    failure.status = response.status;
+    failure.code = await googleTokenError(response);
+    throw failure;
   }
   const payload = await response.json();
   return {
@@ -170,9 +188,32 @@ function callbackUrl(request) {
   return `${new URL(request.url).origin}/auth/callback`;
 }
 
-function doneUrl(request, result) {
+async function googleTokenError(response) {
+  let text = "";
+  try {
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > 2048) return "";
+    text = await response.text();
+  } catch {
+    return "";
+  }
+  if (text.length > 2048) return "";
+  try {
+    const payload = JSON.parse(text);
+    return safeErrorCode(payload && payload.error);
+  } catch {
+    return "";
+  }
+}
+
+function safeErrorCode(value) {
+  return typeof value === "string" && /^[a-z0-9_]{1,64}$/.test(value) ? value : "";
+}
+
+function doneUrl(request, result, reason) {
   const url = new URL("/", request.url);
   url.searchParams.set("calendar", result);
+  if (result === "error" && TOKEN_ERROR_CODES.has(reason)) url.searchParams.set("reason", reason);
   return url.toString();
 }
 
