@@ -179,3 +179,80 @@ test("only the email inside the verified token is allowed", async () => {
   }), settings, { fetchImpl });
   assert.equal(headerOnly.status, 401);
 });
+
+test("Worker Access identity is used before any header or cookie", async () => {
+  clearAccessCertCache();
+  const { pair, jwk } = await signingKey("key-ctx");
+  const otherToken = await sign(pair, claims({ email: "other@example.com" }), "key-ctx");
+  let fetched = false;
+  const lines = [];
+  const original = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    const allowed = await handleRequest(new Request(`${SITE}/api/events`, {
+      headers: {
+        "Cf-Access-Jwt-Assertion": otherToken,
+        "Cf-Access-Authenticated-User-Email": "other@example.com",
+      },
+    }), env(), {
+      fetchImpl: async () => { fetched = true; return new Response("{}", { status: 500 }); },
+      ctx: {
+        access: {
+          aud: AUD,
+          async getIdentity() { return { email: "Glenn@OIBC.ca" }; },
+        },
+      },
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(fetched, false);
+
+    const denied = await handleRequest(new Request(`${SITE}/auth/start`, {
+      headers: { "Cf-Access-Authenticated-User-Email": "glenn@oibc.ca" },
+    }), env({ GOOGLE_CLIENT_ID: "client-id", GOOGLE_CLIENT_SECRET: "client-secret" }), {
+      ctx: {
+        access: {
+          aud: AUD,
+          async getIdentity() { return {}; },
+        },
+      },
+    });
+    assert.equal(denied.status, 401);
+
+    const wrongAud = await handleRequest(new Request(`${SITE}/api/events`), env(), {
+      ctx: {
+        access: {
+          aud: "someone-else",
+          async getIdentity() { return { email: "glenn@oibc.ca" }; },
+        },
+      },
+    });
+    assert.equal(wrongAud.status, 401);
+  } finally {
+    console.log = original;
+  }
+  const logged = lines.map((line) => JSON.parse(line)).filter((entry) => entry.message === "access_check");
+  assert.equal(logged[0].used, "ctx");
+  assert.equal(logged[0].ctx, true);
+  assert.equal(logged[0].header, true);
+  assert.equal(lines.join("\n").includes("glenn@"), false);
+  assert.equal(lines.join("\n").includes(otherToken), false);
+});
+
+test("the CF_Authorization cookie is accepted when the header is absent", async () => {
+  clearAccessCertCache();
+  const { pair, jwk } = await signingKey("key-cookie");
+  const token = await sign(pair, claims(), "key-cookie");
+  const response = await handleRequest(new Request(`${SITE}/api/events`, {
+    headers: {
+      cookie: `CF_Authorization=${token}`,
+      "Cf-Access-Authenticated-User-Email": "glenn@oibc.ca",
+    },
+  }), env(), { fetchImpl: certFetch(jwk, []) });
+  assert.equal(response.status, 200);
+  assert.equal(JSON.stringify(await response.json()).includes(token), false);
+
+  const broken = await handleRequest(new Request(`${SITE}/api/events`, {
+    headers: { cookie: "CF_Authorization=%E0%A4%A" },
+  }), env(), { fetchImpl: async () => { throw new Error("should not fetch"); } });
+  assert.equal(broken.status, 401);
+});
