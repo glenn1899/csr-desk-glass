@@ -3,8 +3,14 @@ import { readRefreshToken } from "./oauth.js";
 import { SAMPLE_NOTICE, sampleEvents } from "./sample.js";
 import { TORONTO, formatInTimeZone, torontoWindow } from "./time.js";
 
-const OAUTH_KEYS = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "CALENDAR_ID"];
-const SECRET_KEYS = [...OAUTH_KEYS, "GOOGLE_REFRESH_TOKEN"];
+const SECRET_KEYS = [
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
+  "GOOGLE_REFRESH_TOKEN",
+  "CALENDAR_ID",
+  "CALENDAR_IDS",
+  "CALENDAR_NAMES",
+];
 const SAFE_ERRORS = new Set([
   "Could not read the Google calendar.",
   "Google authorization failed.",
@@ -14,9 +20,12 @@ const SAFE_ERRORS = new Set([
 
 export function selectSource(env) {
   const source = env || {};
-  const present = OAUTH_KEYS.filter((key) => !blank(source[key]));
-  if (present.length === OAUTH_KEYS.length) return "google";
-  if (present.length > 0 || !blank(source.GOOGLE_REFRESH_TOKEN)) return "invalid";
+  const clientReady = !blank(source.GOOGLE_CLIENT_ID) && !blank(source.GOOGLE_CLIENT_SECRET);
+  const calendarReady = !blank(source.CALENDAR_ID) || !blank(source.CALENDAR_IDS) || !blank(source.CALENDAR_NAMES);
+  const anyPiece = !blank(source.GOOGLE_CLIENT_ID) || !blank(source.GOOGLE_CLIENT_SECRET)
+    || calendarReady || !blank(source.GOOGLE_REFRESH_TOKEN);
+  if (clientReady && calendarReady) return "google";
+  if (anyPiece) return "invalid";
   return "sample";
 }
 
@@ -83,14 +92,14 @@ export async function loadEvents(env, options = {}) {
       };
     }
     const raw = await fetchGoogleEvents(sourceEnv, window, fetchImpl);
-    const events = (await withIds(raw)).sort(compareEvents).slice(0, 250);
+    const events = (await withIds(raw.events || [])).sort(compareEvents).slice(0, 250);
     return {
       status: 200,
       body: envelope({
         ok: true,
         source: "google",
         generatedAt,
-        notice: null,
+        notice: raw.notice || null,
         window,
         events,
       }),
@@ -130,6 +139,8 @@ export async function withIds(events) {
       startDate: event.allDay ? event.startDate : null,
       endDate: event.allDay ? event.endDate : null,
       location: event.location || "",
+      calendar: event.calendar || "",
+      team: !!event.team,
     });
   }
   return out;
