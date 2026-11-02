@@ -140,6 +140,7 @@
   .note { margin-bottom: 1.25rem; border-radius: 22px; padding: .85rem 1rem; font-size: .875rem; color: #3a3a3c; }
   .loc { margin: .75rem 0 0; font-size: 15px; color: #3a3a3c; overflow-wrap: anywhere; }
   .retry { margin-top: 1.25rem; min-height: 2.75rem; border-radius: 999px; background: #1d1d1f; color: #fff; padding: 0 1rem; font-weight: 500; }
+  a.retry { display: inline-flex; align-items: center; margin-right: .75rem; text-decoration: none; }
   h2.title, .next h2, .day .ttl { overflow-wrap: anywhere; }
   .rail .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #next:empty { display: none; }
@@ -204,7 +205,7 @@
 </main>
 <script>
 (function () {
-  var REFRESH_MS = 3 * 60 * 1000;
+  var REFRESH_MS = 60 * 1000;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var SHORT = { January:"Jan", February:"Feb", March:"Mar", April:"Apr", May:"May", June:"Jun", July:"Jul", August:"Aug", September:"Sep", October:"Oct", November:"Nov", December:"Dec" };
   var data = null;
@@ -215,6 +216,8 @@
   var seen = undefined;
   var pullGen = 0;
   var fetchedAt = 0;
+  var reason = "";
+  var connectNote = "";
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -357,7 +360,6 @@
     if (!data) return "";
     if (data.source === "sample") return "Sample data";
     if (data.source === "google") return "Google Calendar";
-    if (data.source === "ics") return "Calendar feed";
     return "";
   }
   function fineText() {
@@ -448,7 +450,7 @@
     var today = list.filter(function (ev) { return onDay(ev, clock.ymd); }).slice(0, 20);
     var allDay = today.filter(function (ev) { return ev.allDay; });
     var eventKey = list.map(function (ev) { return ev.id + ev.title + (ev.start || ev.startDate) + (ev.end || ev.endDate); }).join(",");
-    var nextSig = [status, errorMsg, preview || "", clock.ymd, data && data.source || "", current && current.id || "", upcoming && upcoming.id || "", eventKey].join("|");
+    var nextSig = [status, errorMsg, reason, connectNote, preview || "", clock.ymd, data && data.source || "", current && current.id || "", upcoming && upcoming.id || "", eventKey].join("|");
     if (nextSig === sig) {
       if ((status === "ready" || data) && !preview && current) {
         var meter = document.getElementById("meter");
@@ -473,10 +475,12 @@
     var banner = "";
     if (preview && focus) {
       banner = '<div class="banner"><p>Previewing ' + esc(focus.title) + '.</p><button type="button" id="back">Back</button></div>';
-    } else if (status === "error" && data) {
-      banner = '<div class="note glass" role="status">' + esc(errorMsg) + "</div>";
-    } else if (data && data.source === "sample" && data.notice && status !== "loading") {
-      banner = '<div class="note glass" role="status">' + esc(data.notice) + "</div>";
+    } else {
+      var notes = [];
+      if (connectNote) notes.push(connectNote);
+      if (status === "error" && data && errorMsg) notes.push(errorMsg);
+      else if (data && data.source === "sample" && data.notice && status !== "loading") notes.push(data.notice);
+      if (notes.length) banner = '<div class="note glass" role="status">' + notes.map(esc).join(" ") + "</div>";
     }
     document.getElementById("banner").innerHTML = banner;
     var nowHtml = "";
@@ -485,7 +489,7 @@
     if (!data && status === "loading") {
       nowHtml = hero("Calendar", "Loading", "Checking today's events.");
     } else if (!data && status === "error") {
-      nowHtml = hero("Calendar", "Unavailable", errorMsg, '<button class="retry" type="button" id="retry">Try again</button>');
+      nowHtml = hero("Calendar", "Unavailable", errorMsg, (reason === "not_connected" ? '<a class="retry" href="/auth/start">Connect calendar</a>' : "") + '<button class="retry" type="button" id="retry">Try again</button>');
     } else if (!list.length) {
       nowHtml = hero("Calendar", "Nothing scheduled", "No events today or in the next two weeks.");
     } else if (focus) {
@@ -530,10 +534,13 @@
         if (!body || body.ok !== true || !Array.isArray(body.events)) {
           status = "error";
           errorMsg = safeError(body);
+          reason = body && body.reason === "not_connected" ? "not_connected" : "";
+          if (reason === "not_connected") data = null;
         } else {
           status = "ready";
           data = body;
           errorMsg = "";
+          reason = "";
           fetchedAt = Date.now();
         }
         sig = "";
@@ -543,6 +550,7 @@
         if (gen !== pullGen) return;
         status = "error";
         errorMsg = "The calendar didn't load. Trying again shortly.";
+        reason = "";
         sig = "";
         render();
       });
@@ -583,6 +591,16 @@
     requestAnimationFrame(hands);
   }
   requestAnimationFrame(hands);
+  try {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get("calendar") === "connected") connectNote = "Calendar connected.";
+    if (params.get("calendar") === "error") connectNote = "Could not connect the calendar. Try again.";
+    if (params.has("calendar")) {
+      params.delete("calendar");
+      var query = params.toString();
+      history.replaceState(null, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
+    }
+  } catch (e) { /* keep the page usable if the address cannot be rewritten */ }
   render();
   pull();
   setInterval(function () {
@@ -590,7 +608,7 @@
     pull();
   }, REFRESH_MS);
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible" && Date.now() - fetchedAt > 2 * 60 * 1000) pull();
+    if (document.visibilityState === "visible" && Date.now() - fetchedAt >= REFRESH_MS) pull();
   });
 })();
 </script>

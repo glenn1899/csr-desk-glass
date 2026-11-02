@@ -1,3 +1,4 @@
+import { getAccessToken } from "./oauth.js";
 import { TORONTO, addDays, formatInTimeZone, formatYmd, parseYmd } from "./time.js";
 
 const MAX_PAGES = 4;
@@ -50,7 +51,7 @@ export function mapGoogleItem(item) {
 }
 
 export async function fetchGoogleEvents(env, window, fetchImpl) {
-  const accessToken = await refreshAccessToken(env, fetchImpl);
+  const accessToken = await getAccessToken(env, fetchImpl);
   const items = [];
   let pageToken = "";
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -85,31 +86,6 @@ export async function fetchGoogleEvents(env, window, fetchImpl) {
     pageToken = String(payload.nextPageToken);
   }
   return mapGoogleItems(items);
-}
-
-async function refreshAccessToken(env, fetchImpl) {
-  let response;
-  try {
-    response = await fetchImpl("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
-      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-      body: new URLSearchParams({
-        client_id: String(env.GOOGLE_CLIENT_ID).trim(),
-        client_secret: String(env.GOOGLE_CLIENT_SECRET).trim(),
-        refresh_token: String(env.GOOGLE_REFRESH_TOKEN).trim(),
-        grant_type: "refresh_token",
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch {
-    throw new Error("Google authorization failed.");
-  }
-  if (!response.ok) throw new Error("Google authorization failed.");
-  const payload = await response.json();
-  if (!payload || !payload.access_token) throw new Error("Google authorization failed.");
-  return String(payload.access_token);
 }
 
 function nextDate(ymd) {

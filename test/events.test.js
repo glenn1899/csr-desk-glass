@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest } from "../functions/api/events.js";
 import { mapGoogleItems } from "../functions/_lib/google.js";
+import { ACCESS_KEY, CALENDAR_SCOPE, REFRESH_KEY } from "../functions/_lib/oauth.js";
 import { loadEvents } from "../functions/_lib/schedule.js";
 
 const NOW = new Date("2026-11-02T15:00:00Z");
@@ -28,19 +29,18 @@ test("a partial Google setup does not fall back to sample data", async () => {
   assert.match(result.body.error, /incomplete/);
 });
 
-test("ICS failures do not echo the secret address", async () => {
-  const secret = "https://calendar.google.com/calendar/ical/SECRETTOKEN/basic.ics";
-  const result = await loadEvents({ ICS_URL: secret }, {
-    now: NOW,
-    fetchImpl: async () => {
-      throw new Error(`network down ${secret}`);
-    },
-  });
-  const body = JSON.stringify(result);
-  assert.equal(result.status, 502);
-  assert.equal(body.includes("SECRETTOKEN"), false);
-  assert.equal(body.includes(secret), false);
-  assert.equal(result.body.error, "Could not read the calendar feed.");
+test("configured Google settings without a refresh token are not sample data", async () => {
+  const result = await loadEvents({
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    CALENDAR_ID: "primary",
+    CAL_KV: mockKv(),
+  }, { now: NOW });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.reason, "not_connected");
+  assert.equal(result.body.error, "Calendar is not connected yet.");
+  assert.equal(result.body.events.length, 0);
+  assert.equal(JSON.stringify(result.body).includes("client-secret"), false);
 });
 
 test("Google tokens stay out of the response", async () => {
@@ -58,8 +58,11 @@ test("Google tokens stay out of the response", async () => {
       const href = String(url);
       if (href.includes("oauth2.googleapis.com")) {
         assert.equal(options.method, "POST");
-        assert.equal(String(options.body).includes(refreshToken), true);
-        return new Response(JSON.stringify({ access_token: "ya29.test-access" }), { status: 200 });
+        const params = new URLSearchParams(String(options.body));
+        assert.equal(params.get("grant_type"), "refresh_token");
+        assert.equal(params.get("refresh_token"), refreshToken);
+        assert.equal(params.get("scope"), CALENDAR_SCOPE);
+        return new Response(JSON.stringify({ access_token: "ya29.test-access", expires_in: 3600 }), { status: 200 });
       }
       authorized = options.headers.authorization === "Bearer ya29.test-access";
       assert.equal(href.includes("calendars/primary/events"), true);
@@ -108,53 +111,75 @@ test("Google tokens stay out of the response", async () => {
   assert.equal(body.includes("ya29"), false);
 });
 
-test("attendee addresses and calendar ids are not returned", async () => {
-  const result = await loadEvents({ ICS_URL: "https://calendar.example/secret-feed.ics" }, {
-    now: NOW,
-    fetchImpl: async () => new Response(`BEGIN:VCALENDAR
-BEGIN:VEVENT
-UID:kept@example.com
-SUMMARY:Kept
-DTSTART:20261102T150000Z
-DTEND:20261102T160000Z
-ATTENDEE:mailto:person@example.com
-END:VEVENT
-END:VCALENDAR`, { status: 200 }),
-  });
-  const body = JSON.stringify(result.body);
-  assert.equal(result.body.events[0].title, "Kept");
-  assert.equal(body.includes("@"), false);
-  assert.equal(body.includes("person"), false);
-  assert.equal(body.includes("secret-feed"), false);
+test("a saved KV refresh token is preferred and the access token is cached briefly", async () => {
+  const kv = mockKv({ [REFRESH_KEY]: "kv-refresh-token" });
+  let tokenCalls = 0;
+  const fetchImpl = async (url, options) => {
+    if (String(url).includes("oauth2.googleapis.com")) {
+      tokenCalls += 1;
+      const params = new URLSearchParams(String(options.body));
+      assert.equal(params.get("refresh_token"), "kv-refresh-token");
+      assert.equal(params.get("scope"), CALENDAR_SCOPE);
+      assert.notEqual(params.get("refresh_token"), "env-refresh-token");
+      return new Response(JSON.stringify({ access_token: "ya29.cached-access", expires_in: 3600 }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ items: [] }), { status: 200 });
+  };
+  const env = {
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    GOOGLE_REFRESH_TOKEN: "env-refresh-token",
+    CALENDAR_ID: "primary",
+    CAL_KV: kv,
+  };
+  await loadEvents(env, { now: NOW, fetchImpl });
+  await loadEvents(env, { now: NOW, fetchImpl });
+  assert.equal(tokenCalls, 1);
+  assert.equal(await kv.get(ACCESS_KEY), "ya29.cached-access");
+  const saved = kv.puts.find((entry) => entry.key === ACCESS_KEY);
+  assert.equal(saved.opts.expirationTtl, 15 * 60);
+  assert.equal(JSON.stringify(saved.opts).includes("env-refresh-token"), false);
 });
 
-test("an iCal address wins when Google variables are also present", async () => {
-  let calls = 0;
+test("a short-lived access token is not cached", async () => {
+  const kv = mockKv({ [REFRESH_KEY]: "kv-refresh-token" });
+  let tokenCalls = 0;
+  const fetchImpl = async (url) => {
+    if (String(url).includes("oauth2.googleapis.com")) {
+      tokenCalls += 1;
+      return new Response(JSON.stringify({ access_token: "ya29.short", expires_in: 90 }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ items: [] }), { status: 200 });
+  };
+  const env = {
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    CALENDAR_ID: "primary",
+    CAL_KV: kv,
+  };
+  await loadEvents(env, { now: NOW, fetchImpl });
+  await loadEvents(env, { now: NOW, fetchImpl });
+  assert.equal(tokenCalls, 2);
+  assert.equal(await kv.get(ACCESS_KEY), null);
+});
+
+test("a token request failure does not echo the refresh token", async () => {
+  const refreshToken = "super-secret-refresh-token-value";
   const result = await loadEvents({
-    ICS_URL: "https://calendar.example/feed.ics",
-    GOOGLE_CLIENT_ID: "id",
-    GOOGLE_CLIENT_SECRET: "secret",
-    GOOGLE_REFRESH_TOKEN: "refresh",
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    GOOGLE_REFRESH_TOKEN: refreshToken,
     CALENDAR_ID: "primary",
   }, {
     now: NOW,
     fetchImpl: async () => {
-      calls += 1;
-      return new Response(`BEGIN:VCALENDAR
-BEGIN:VEVENT
-UID:one
-SUMMARY:From the feed
-DTSTART:20261102T150000Z
-DTEND:20261102T160000Z
-END:VEVENT
-END:VCALENDAR`, { status: 200 });
+      throw new Error(`network down ${refreshToken}`);
     },
   });
-  assert.equal(calls, 1);
-  assert.equal(result.body.source, "ics");
-  assert.equal(result.body.events[0].title, "From the feed");
-  assert.equal(result.body.events[0].start, "2026-11-02T10:00:00-05:00");
-  assert.match(result.body.events[0].id, /^[0-9a-f]{16}$/);
+  const body = JSON.stringify(result);
+  assert.equal(result.status, 502);
+  assert.equal(result.body.error, "Google authorization failed.");
+  assert.equal(body.includes(refreshToken), false);
 });
 
 test("Google items from another zone are normalized before display", () => {
@@ -168,20 +193,20 @@ test("Google items from another zone are normalized before display", () => {
   assert.equal(event.end, "2026-07-01T13:00:00-04:00");
 });
 
-test("the Pages function serves sample JSON with a one-minute private cache", async () => {
+test("the Pages function serves sample JSON with a 30 second private cache", async () => {
   const response = await onRequest({
-    request: new Request("https://desk.example/api/events?ICS_URL=https://evil.example/secret.ics"),
+    request: new Request("https://desk.example/api/events?token=ya29.not-a-setting"),
     env: {},
   });
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "private, max-age=60");
+  assert.equal(response.headers.get("cache-control"), "private, max-age=30");
   assert.equal(response.headers.get("cdn-cache-control"), "no-store");
   assert.equal(response.headers.get("x-robots-tag"), "noindex");
   assert.match(response.headers.get("content-type"), /^application\/json/);
   const body = await response.json();
   assert.equal(body.source, "sample");
   assert.equal(body.ok, true);
-  assert.equal(JSON.stringify(body).includes("evil.example"), false);
+  assert.equal(JSON.stringify(body).includes("ya29"), false);
 });
 
 test("failed responses are not cached", async () => {
@@ -195,37 +220,30 @@ test("failed responses are not cached", async () => {
   assert.equal(rejected.headers.get("cdn-cache-control"), "no-store");
 
   const env = {};
-  Object.defineProperty(env, "ICS_URL", { get() { throw new Error("boom https://secret.example/feed"); } });
+  Object.defineProperty(env, "GOOGLE_CLIENT_ID", { get() { throw new Error("boom https://secret.example/feed"); } });
   const failed = await onRequest({
     request: new Request("https://desk.example/api/events"),
     env,
   });
   assert.equal(failed.status, 500);
   assert.equal(failed.headers.get("cache-control"), "private, no-store");
-  const body = await failed.json();
-  assert.equal(JSON.stringify(body).includes("secret.example"), false);
+  const failedBody = await failed.json();
+  assert.equal(JSON.stringify(failedBody).includes("secret.example"), false);
 });
 
-test("a wrong Content-Length does not hide a small calendar, and a huge feed is refused", async () => {
-  const small = await loadEvents({ ICS_URL: "https://calendar.example/feed.ics" }, {
-    now: NOW,
-    fetchImpl: async () => new Response(`BEGIN:VCALENDAR
-BEGIN:VEVENT
-UID:one
-SUMMARY:Kept
-DTSTART:20261102T150000Z
-DTEND:20261102T160000Z
-END:VEVENT
-END:VCALENDAR`, { status: 200, headers: { "content-length": "9000000" } }),
-  });
-  assert.equal(small.status, 200);
-  assert.equal(small.body.events[0].title, "Kept");
-
-  const huge = await loadEvents({ ICS_URL: "https://calendar.example/feed.ics" }, {
-    now: NOW,
-    fetchImpl: async () => new Response(`BEGIN:VCALENDAR\n${"A".repeat(2_000_001)}`, { status: 200 }),
-  });
-  assert.equal(huge.status, 502);
-  assert.equal(huge.body.error, "Calendar file is too large.");
-  assert.equal(huge.body.events.length, 0);
-});
+function mockKv(initial = {}) {
+  const store = new Map(Object.entries(initial));
+  return {
+    puts: [],
+    async get(key) {
+      return store.has(key) ? store.get(key) : null;
+    },
+    async put(key, value, opts) {
+      store.set(key, String(value));
+      this.puts.push({ key, value: String(value), opts });
+    },
+    async delete(key) {
+      store.delete(key);
+    },
+  };
+}

@@ -1,23 +1,22 @@
 import { fetchGoogleEvents } from "./google.js";
-import { fetchIcsEvents } from "./ics.js";
+import { readRefreshToken } from "./oauth.js";
 import { SAMPLE_NOTICE, sampleEvents } from "./sample.js";
 import { TORONTO, formatInTimeZone, torontoWindow } from "./time.js";
 
-const GOOGLE_KEYS = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN", "CALENDAR_ID"];
+const OAUTH_KEYS = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "CALENDAR_ID"];
+const SECRET_KEYS = [...OAUTH_KEYS, "GOOGLE_REFRESH_TOKEN"];
 const SAFE_ERRORS = new Set([
-  "Could not read the calendar feed.",
-  "Calendar file is too large.",
   "Could not read the Google calendar.",
   "Google authorization failed.",
   "Google Calendar settings are incomplete.",
+  "Calendar is not connected yet.",
 ]);
 
 export function selectSource(env) {
   const source = env || {};
-  if (!blank(source.ICS_URL)) return "ics";
-  const present = GOOGLE_KEYS.filter((key) => !blank(source[key]));
-  if (present.length === GOOGLE_KEYS.length) return "google";
-  if (present.length > 0) return "invalid";
+  const present = OAUTH_KEYS.filter((key) => !blank(source[key]));
+  if (present.length === OAUTH_KEYS.length) return "google";
+  if (present.length > 0 || !blank(source.GOOGLE_REFRESH_TOKEN)) return "invalid";
   return "sample";
 }
 
@@ -56,15 +55,27 @@ export async function loadEvents(env, options = {}) {
         }),
       };
     }
-    const raw = mode === "ics"
-      ? await fetchIcsEvents(String(sourceEnv.ICS_URL).trim(), window, fetchImpl)
-      : await fetchGoogleEvents(sourceEnv, window, fetchImpl);
+    const refreshToken = await readRefreshToken(sourceEnv);
+    if (!refreshToken) {
+      return {
+        status: 409,
+        body: envelope({
+          ok: false,
+          source: "google",
+          generatedAt,
+          error: "Calendar is not connected yet.",
+          reason: "not_connected",
+          events: [],
+        }),
+      };
+    }
+    const raw = await fetchGoogleEvents(sourceEnv, window, fetchImpl);
     const events = (await withIds(raw)).sort(compareEvents).slice(0, 250);
     return {
       status: 200,
       body: envelope({
         ok: true,
-        source: mode,
+        source: "google",
         generatedAt,
         notice: null,
         window,
@@ -73,13 +84,15 @@ export async function loadEvents(env, options = {}) {
     };
   } catch (err) {
     console.log(JSON.stringify({ level: "error", source: mode, message: "calendar_read_failed" }));
+    const notConnected = err && err.message === "Calendar is not connected yet.";
     return {
-      status: 502,
+      status: notConnected ? 409 : 502,
       body: envelope({
         ok: false,
         source: mode,
         generatedAt,
         error: safeErrorMessage(err, sourceEnv),
+        reason: notConnected ? "not_connected" : null,
         events: [],
       }),
     };
@@ -122,6 +135,7 @@ function envelope(fields) {
     generatedAt: fields.generatedAt,
     notice: fields.notice || null,
     error: fields.error || null,
+    reason: fields.reason || null,
     window: fields.window
       ? {
         from: formatInTimeZone(fields.window.start, TORONTO),
@@ -140,7 +154,7 @@ function safeErrorMessage(err, env) {
 
 function redact(message, env) {
   let out = message;
-  for (const key of ["ICS_URL", ...GOOGLE_KEYS]) {
+  for (const key of SECRET_KEYS) {
     const value = env && env[key] != null ? String(env[key]).trim() : "";
     if (value.length > 3) out = out.split(value).join("[redacted]");
   }

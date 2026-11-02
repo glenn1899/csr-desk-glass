@@ -32,7 +32,7 @@ function respond(body, status, extra, head) {
     status,
     headers: {
       ...BASE_HEADERS,
-      "cache-control": status >= 400 ? "private, no-store" : "private, max-age=60",
+      "cache-control": status >= 400 ? "private, no-store" : "private, max-age=30",
       ...extra,
     },
   });
