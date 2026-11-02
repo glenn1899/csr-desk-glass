@@ -11,11 +11,53 @@ export function clearAccessCertCache() {
 }
 
 export async function verifyAccessJwt(request, env, options = {}) {
-  const token = request.headers.get(JWT_HEADER);
+  const headerToken = jwtFromHeader(request);
+  const cookie = authorizationCookie(request);
+  const access = options.ctx && options.ctx.access;
+  const presence = {
+    ctx: Boolean(access),
+    header: Boolean(headerToken),
+    cookie: cookie.present,
+  };
+  let used = "none";
+  let ok = false;
+  try {
+    if (access) {
+      used = "ctx";
+      ok = await identityFromContext(access, env);
+    } else if (headerToken) {
+      used = "header";
+      ok = await verifySignedToken(headerToken, env, options);
+    } else if (cookie.token) {
+      used = "cookie";
+      ok = await verifySignedToken(cookie.token, env, options);
+    }
+  } catch {
+    ok = false;
+  }
+  console.log(JSON.stringify({
+    message: "access_check",
+    ctx: presence.ctx,
+    header: presence.header,
+    cookie: presence.cookie,
+    used: ok ? used : "none",
+  }));
+  return ok;
+}
+
+async function identityFromContext(access, env) {
+  const expectedAud = configuredAud(env);
+  if (!expectedAud || typeof access.getIdentity !== "function") return false;
+  if (!audienceMatches(access.aud, expectedAud)) return false;
+  const identity = await access.getIdentity();
+  return emailAllowed(identity || {}, env);
+}
+
+async function verifySignedToken(token, env, options) {
   if (!token || token.length > MAX_TOKEN_LENGTH) return false;
-  const team = env && env.ACCESS_TEAM_DOMAIN ? String(env.ACCESS_TEAM_DOMAIN).trim() : "";
-  const expectedAud = env && env.ACCESS_AUD ? String(env.ACCESS_AUD).trim() : "";
-  if (!team || !expectedAud || team.includes("/") || team.includes(" ")) return false;
+  const team = configuredTeam(env);
+  const expectedAud = configuredAud(env);
+  if (!team || !expectedAud) return false;
 
   const parts = token.split(".");
   if (parts.length !== 3) return false;
@@ -54,6 +96,38 @@ export async function verifyAccessJwt(request, env, options = {}) {
   } catch {
     return false;
   }
+}
+
+function jwtFromHeader(request) {
+  const token = request.headers.get(JWT_HEADER);
+  return token && token.trim() ? token.trim() : "";
+}
+
+function authorizationCookie(request) {
+  const header = request.headers.get("cookie") || "";
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim().toLowerCase() !== "cf_authorization") continue;
+    let raw = part.slice(eq + 1).trim();
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      return { present: true, token: "" };
+    }
+    return { present: true, token: raw.replace(/^"|"$/g, "") };
+  }
+  return { present: false, token: "" };
+}
+
+function configuredTeam(env) {
+  const team = env && env.ACCESS_TEAM_DOMAIN ? String(env.ACCESS_TEAM_DOMAIN).trim() : "";
+  if (!team || team.includes("/") || team.includes(" ")) return "";
+  return team;
+}
+
+function configuredAud(env) {
+  return env && env.ACCESS_AUD ? String(env.ACCESS_AUD).trim() : "";
 }
 
 function emailAllowed(payload, env) {

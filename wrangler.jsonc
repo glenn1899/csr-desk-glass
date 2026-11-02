@@ -17,12 +17,9 @@
       "enabled": true
     }
   },
-  "assets": {
-    "directory": "./public",
-    "binding": "ASSETS",
-    // The Worker routes /api and /auth, then serves index.html through ASSETS.
-    "run_worker_first": true
-  },
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html"], "fallthrough": false }
+  ],
   "vars": {
     "ACCESS_TEAM_DOMAIN": "dry-mud-91ba.cloudflareaccess.com",
     "ACCESS_AUD": "f3e04809e143ccb2737c5becfe83dd36c5852415051eb808ff95e638974bdec5",

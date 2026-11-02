@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --import ./scripts/register-html.mjs --test"
   },
   "engines": {
     "node": ">=20"

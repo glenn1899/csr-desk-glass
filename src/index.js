@@ -1,7 +1,13 @@
+import indexHtml from "../public/index.html";
 import { verifyAccessJwt } from "./lib/access.js";
 import { onRequest as onAuthCallback } from "./routes/auth-callback.js";
 import { onRequest as onAuthStart } from "./routes/auth-start.js";
 import { onRequest as onEvents } from "./routes/events.js";
+
+const files = {
+  "/": { body: indexHtml, type: "text/html; charset=utf-8" },
+  "/index.html": { body: indexHtml, type: "text/html; charset=utf-8" },
+};
 
 const routes = {
   "/api/events": onEvents,
@@ -17,13 +23,28 @@ export async function handleRequest(request, env, options = {}) {
     if (!allowed) return accessDenied();
     return handler({ request, env: env || {} });
   }
-  if (!env || !env.ASSETS || typeof env.ASSETS.fetch !== "function") {
-    return new Response("Page unavailable.", {
-      status: 500,
-      headers: { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" },
+  return staticFile(path);
+}
+
+function staticFile(path) {
+  const file = files[path];
+  if (!file) {
+    return new Response("Not found.", {
+      status: 404,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "private, no-store",
+      },
     });
   }
-  return env.ASSETS.fetch(request);
+  return new Response(file.body, {
+    status: 200,
+    headers: {
+      "content-type": file.type,
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
 }
 
 async function gate(request, env, options) {
@@ -47,7 +68,7 @@ function accessDenied() {
 }
 
 export default {
-  async fetch(request, env) {
-    return handleRequest(request, env);
+  async fetch(request, env, ctx) {
+    return handleRequest(request, env, { ctx });
   },
 };
