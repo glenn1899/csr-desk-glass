@@ -406,6 +406,53 @@ test("one calendar failing still returns the others", async () => {
   assert.equal(body.includes("secret title"), false);
 });
 
+test("both calendars are read through the following days", async () => {
+  const seen = [];
+  const result = await loadEvents({
+    GOOGLE_CLIENT_ID: "client-id",
+    GOOGLE_CLIENT_SECRET: "client-secret",
+    GOOGLE_REFRESH_TOKEN: "refresh-token",
+    CALENDAR_IDS: "primary",
+    CALENDAR_NAMES: "Broker Support Team",
+  }, {
+    now: NOW,
+    fetchImpl: async (url) => {
+      const href = String(url);
+      if (href.includes("oauth2.googleapis.com")) {
+        return new Response(JSON.stringify({ access_token: "ya29.test-access", expires_in: 3600 }), { status: 200 });
+      }
+      if (href.includes("/users/me/calendarList")) {
+        return new Response(JSON.stringify({
+          items: [{ id: "team-cal", summary: "Broker Support Team" }],
+        }), { status: 200 });
+      }
+      const params = new URL(href).searchParams;
+      seen.push({ href, timeMax: params.get("timeMax") });
+      if (href.includes("/calendars/primary/events")) {
+        return new Response(JSON.stringify({
+          items: [{
+            id: "today",
+            summary: "Today call",
+            start: { dateTime: "2026-11-02T11:00:00-05:00" },
+            end: { dateTime: "2026-11-02T11:30:00-05:00" },
+          }],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        items: [{
+          id: "tomorrow",
+          summary: "Tomorrow standup",
+          start: { dateTime: "2026-11-03T09:00:00-05:00" },
+          end: { dateTime: "2026-11-03T09:30:00-05:00" },
+        }],
+      }), { status: 200 });
+    },
+  });
+  assert.equal(seen.length, 2);
+  assert.ok(seen.every((call) => call.timeMax > "2026-11-03"));
+  assert.deepEqual(result.body.events.map((event) => event.title), ["Today call", "Tomorrow standup"]);
+});
+
 function mockKv(initial = {}) {
   const store = new Map(Object.entries(initial));
   return {
