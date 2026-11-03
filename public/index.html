@@ -118,7 +118,7 @@
     border-radius: 999px; background: #1d1d1f; color: #fff; padding: .5rem .5rem .5rem 1rem; font-size: .875rem;
   }
   .banner button { min-height: 2.25rem; border-radius: 999px; background: #fff; color: #1d1d1f; padding: 0 .75rem; font-weight: 500; }
-  details { margin-top: 2rem; }
+  details { margin-top: 1rem; }
   summary { display: flex; min-height: 2.75rem; align-items: center; justify-content: space-between; font-size: 15px; font-weight: 500; list-style: none; }
   summary::-webkit-details-marker { display: none; }
   summary svg { width: 1rem; height: 1rem; color: #86868b; transition: transform .2s; }
@@ -154,6 +154,13 @@
     background: #007aff; color: #fff; font-weight: 600;
   }
   .cal h2 { margin: .5rem 0 0; font-size: 17px; line-height: 1.25; font-weight: 500; }
+  .cal .slot { margin-top: .7rem; }
+  .cal .slot h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  .cal .slot .meta { margin: .12rem 0 0; }
+  .cal .dayhead { margin: .8rem 0 0; font-size: 10px; font-weight: 600; letter-spacing: .08em; color: #86868b; }
+  .cal .slot.later { color: #86868b; }
+  .cal .slot.later h2 { font-weight: 500; }
+  .cal .slot.team .who { color: #c93400; }
   .cal .kicker, .cal .meta { font-size: 12px; }
   .cal .kicker { margin: 0; letter-spacing: .04em; text-transform: uppercase; color: #007aff; }
   .cal .meta { margin: .35rem 0 0; color: #6e6e73; }
@@ -673,24 +680,50 @@
     if (!hit) return "";
     return '<span class="meet' + (team ? " team" : "") + '"></span>';
   }
-  function calendarFocus(clock) {
-    var now = new Date();
-    var timed = events().filter(function (ev) { return !ev.allDay; });
-    var current = null;
-    timed.forEach(function (ev) {
-      var start = new Date(ev.start).getTime();
-      var end = new Date(ev.end).getTime();
-      if (start <= now.getTime() && now.getTime() < end && (!current || start > new Date(current.start).getTime())) current = ev;
-    });
-    if (current) return current;
-    var next = null;
-    timed.forEach(function (ev) {
-      if (new Date(ev.start).getTime() > now.getTime() && (!next || ev.start < next.start)) next = ev;
-    });
-    if (next) return next;
-    var allDay = events().filter(function (ev) { return ev.allDay && onDay(ev, clock.ymd); });
-    return allDay[0] || null;
+  /* upcoming */
+  function nextYmd(ymd) {
+    var p = String(ymd || "").split("-");
+    var dt = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + 1));
+    var m = dt.getUTCMonth() + 1;
+    var d = dt.getUTCDate();
+    return dt.getUTCFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (d < 10 ? "0" : "") + d;
   }
+  function dayHeading(ymd, todayYmd) {
+    if (!ymd || ymd === todayYmd) return "";
+    if (ymd === nextYmd(todayYmd)) return "TOMORROW";
+    var p = ymd.split("-");
+    var names = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    var wd = names[new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]))).getUTCDay()];
+    return wd + " " + Number(p[2]);
+  }
+  function nextThree(events, nowMs, todayYmd) {
+    var list = [];
+    for (var i = 0; i < events.length; i++) {
+      var ev = events[i];
+      if (!ev) continue;
+      var day = "";
+      var sort = "";
+      if (ev.allDay) {
+        if (!(ev.endDate > todayYmd)) continue;
+        day = ev.startDate <= todayYmd ? todayYmd : ev.startDate;
+        sort = day;
+      } else {
+        if (!(new Date(ev.end).getTime() > nowMs)) continue;
+        day = ev.day || "";
+        sort = ev.start || "";
+      }
+      list.push({ ev: ev, day: day, sort: sort });
+    }
+    list.sort(function (a, b) {
+      if (a.sort < b.sort) return -1;
+      if (a.sort > b.sort) return 1;
+      var at = a.ev.title || "";
+      var bt = b.ev.title || "";
+      return at < bt ? -1 : at > bt ? 1 : 0;
+    });
+    return list.slice(0, 3);
+  }
+  /* upcoming-end */
   function formatWhen(ev) {
     if (ev.allDay) return "All day";
     var opts = { timeZone: "America/Toronto", hour: "numeric", minute: "2-digit" };
@@ -711,13 +744,32 @@
     var actions = "";
     if (reason === "not_connected") actions += '<a href="/auth/start">Connect calendar</a>';
     if (status === "error") actions += '<button class="retry" type="button" id="retry">Try again</button>';
-    var ev = calendarFocus(c.clock);
-    if (!ev) {
+    var picked = nextThree(events().map(function (ev) {
+      var copy = {
+        title: ev.title, allDay: !!ev.allDay, start: ev.start, end: ev.end,
+        startDate: ev.startDate, endDate: ev.endDate, calendar: ev.calendar, team: !!ev.team
+      };
+      if (!copy.allDay && ev.start) copy.day = clockOf(new Date(ev.start)).ymd;
+      return copy;
+    }), Date.now(), c.clock.ymd);
+    if (!picked.length) {
       var title = status === "loading" && !data ? "Checking" : "Nothing coming up";
       return '<aside class="cal glass"><p class="kicker">Up next on calendar</p><h2>' + title + "</h2>" + note + actions + "</aside>";
     }
-    var where = ev.calendar ? '<p class="meta">' + esc(ev.calendar) + "</p>" : "";
-    return '<aside class="cal glass' + (ev.team ? " team" : "") + '"><p class="kicker">Up next on calendar</p><h2>' + esc(ev.title) + '</h2><p class="meta">' + esc(formatWhen(ev)) + "</p>" + where + note + actions + "</aside>";
+    var rows = "";
+    var seenDay = "";
+    for (var i = 0; i < picked.length; i++) {
+      var item = picked[i];
+      var ev = item.ev;
+      if (item.day !== c.clock.ymd && item.day !== seenDay) {
+        rows += '<p class="dayhead">' + esc(dayHeading(item.day, c.clock.ymd)) + "</p>";
+      }
+      seenDay = item.day;
+      var later = item.day !== c.clock.ymd;
+      var who = ev.calendar ? '<p class="meta who">' + esc(ev.calendar) + "</p>" : "";
+      rows += '<div class="slot' + (later ? " later" : "") + (!later && ev.team ? " team" : "") + '"><h2>' + esc(ev.title) + '</h2><p class="meta">' + esc(formatWhen(ev)) + "</p>" + who + "</div>";
+    }
+    return '<aside class="cal glass"><p class="kicker">Up next on calendar</p>' + rows + note + actions + "</aside>";
   }
   function pull() {
     var gen = ++pullGen;
