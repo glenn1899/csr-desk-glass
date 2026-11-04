@@ -33,6 +33,12 @@ export function mapGoogleItems(items, source = {}) {
   return events;
 }
 
+export function calendarColor(value) {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-fA-F]{3}$/.test(text) || /^#[0-9a-fA-F]{6}$/.test(text)) return text.toLowerCase();
+  return "";
+}
+
 export function mapGoogleItem(item, source = {}) {
   if (!item || String(item.status || "").toLowerCase() === "cancelled") return null;
   const title = cleanText(item.summary) || "(No title)";
@@ -41,6 +47,7 @@ export function mapGoogleItem(item, source = {}) {
   const icalUid = cleanText(item.iCalUID);
   const calendar = safeLabel(source.name, source.team, source.id);
   const team = !!source.team;
+  const color = calendarColor(source.color);
   if (item.start && item.start.date) {
     const startDate = String(item.start.date);
     const endDate = item.end && item.end.date ? String(item.end.date) : nextDate(startDate);
@@ -57,6 +64,7 @@ export function mapGoogleItem(item, source = {}) {
       endDate,
       calendar,
       team,
+      color,
     };
   }
   const startRaw = item.start && item.start.dateTime;
@@ -77,6 +85,7 @@ export function mapGoogleItem(item, source = {}) {
     endDate: null,
     calendar,
     team,
+    color,
   };
 }
 
@@ -124,11 +133,12 @@ export async function fetchGoogleEvents(env, window, fetchImpl) {
     if (existing) {
       existing.team = true;
       existing.name = safeLabel(item.name, true, item.id);
+      existing.color = item.color || "";
       continue;
     }
     if (seen.has(item.id)) continue;
     seen.add(item.id);
-    sources.push({ id: item.id, name: safeLabel(item.name, true, item.id), team: true });
+    sources.push({ id: item.id, name: safeLabel(item.name, true, item.id), team: true, color: item.color || "" });
   }
   const groups = await Promise.all(sources.map(async (source) => {
     try {
@@ -167,7 +177,7 @@ async function resolveCalendarNames(accessToken, names, fetchImpl) {
     for (const item of items) {
       const summary = item && item.summary != null ? String(item.summary) : "";
       if (!wanted.has(summary) || found.has(summary) || !item.id) continue;
-      found.set(summary, { name: summary, id: String(item.id) });
+      found.set(summary, { name: summary, id: String(item.id), color: calendarColor(item.backgroundColor) });
     }
     if (!payload || !payload.nextPageToken) break;
     pageToken = String(payload.nextPageToken);

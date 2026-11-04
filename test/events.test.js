@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { onRequest } from "../src/routes/events.js";
-import { mapGoogleItems, mergeCalendarEvents } from "../src/lib/google.js";
+import { calendarColor, mapGoogleItems, mergeCalendarEvents } from "../src/lib/google.js";
 import { ACCESS_KEY, CALENDAR_SCOPE, REFRESH_KEY } from "../src/lib/oauth.js";
 import { loadEvents } from "../src/lib/schedule.js";
 
@@ -243,6 +243,13 @@ test("failed responses are not cached", async () => {
   assert.equal(JSON.stringify(failedBody).includes("secret.example"), false);
 });
 
+test("only a hex calendar colour is kept", () => {
+  assert.equal(calendarColor(" #16A765 "), "#16a765");
+  assert.equal(calendarColor("#abc"), "#abc");
+  assert.equal(calendarColor("red"), "");
+  assert.equal(calendarColor("#c93400;color:url(https://evil)"), "");
+});
+
 test("the same meeting on two calendars is kept once and marked as the team copy", () => {
   const personal = {
     uid: "personal-copy",
@@ -299,7 +306,7 @@ test("named calendars are resolved, merged, and a missing calendar does not hide
           assert.equal(new URL(href).searchParams.get("showHidden"), "true");
           return new Response(JSON.stringify({
             items: [
-              { id: teamId, summary: "Broker Support Team", description: "owner@example.com" },
+              { id: teamId, summary: "Broker Support Team", description: "owner@example.com", backgroundColor: "#16A765" },
               { id: "other", summary: "Someone Else" },
             ],
           }), { status: 200 });
@@ -357,8 +364,10 @@ test("named calendars are resolved, merged, and a missing calendar does not hide
   const standup = result.body.events.find((event) => event.title === "Standup");
   assert.equal(standup.team, true);
   assert.equal(standup.calendar, "Broker Support Team");
+  assert.equal(standup.color, "#16a765");
   const renewals = result.body.events.find((event) => event.title === "Renewals");
   assert.equal(renewals.team, true);
+  assert.equal(renewals.color, "#16a765");
   const body = JSON.stringify(result.body);
   assert.equal(body.includes(teamId), false);
   assert.equal(body.includes("owner@example.com"), false);

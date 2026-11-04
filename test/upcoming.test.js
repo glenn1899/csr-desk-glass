@@ -6,10 +6,10 @@ function loadUpcoming() {
   const start = html.indexOf("/* upcoming */");
   const end = html.indexOf("/* upcoming-end */");
   assert.ok(start >= 0 && end > start);
-  return new Function(`${html.slice(start, end)}; return { nextYmd, dayHeading, nextThree };`)();
+  return new Function(`${html.slice(start, end)}; return { nextYmd, dayHeading, nextThree, teamSwatch };`)();
 }
 
-const { nextYmd, dayHeading, nextThree } = loadUpcoming();
+const { nextYmd, dayHeading, nextThree, teamSwatch } = loadUpcoming();
 
 const NOW = Date.parse("2026-11-02T16:00:00Z");
 const TODAY = "2026-11-02";
@@ -37,6 +37,14 @@ test("an event in progress counts, and an empty list stays empty", () => {
   ], NOW, TODAY);
   assert.deepEqual(picked.map((item) => item.ev.title), ["In progress", "Later"]);
   assert.deepEqual(nextThree([], NOW, TODAY), []);
+});
+
+test("a team label uses the calendar colour, never a fallback red", () => {
+  assert.equal(teamSwatch(true, false, "#16A765"), "#16A765");
+  assert.equal(teamSwatch(true, false, ""), "#4f8a5b");
+  assert.equal(teamSwatch(true, false, "red"), "#4f8a5b");
+  assert.equal(teamSwatch(true, true, "#16a765"), "");
+  assert.equal(teamSwatch(false, false, "#16a765"), "");
 });
 
 test("later days are labelled TOMORROW or a short weekday", () => {
