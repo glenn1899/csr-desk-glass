@@ -158,14 +158,13 @@
   .cal .slot h2 { margin: 0; font-size: 15px; font-weight: 600; }
   .cal .slot .meta { margin: .12rem 0 0; }
   .cal .dayhead { margin: .8rem 0 0; font-size: 10px; font-weight: 600; letter-spacing: .08em; color: #86868b; }
-  .cal .slot.later { color: #86868b; }
+  .cal .slot.later,
+  .cal .slot.later .who { color: #86868b; }
   .cal .slot.later h2 { font-weight: 500; }
-  .cal .slot.team .who { color: #c93400; }
   .cal .kicker, .cal .meta { font-size: 12px; }
   .cal .kicker { margin: 0; letter-spacing: .04em; text-transform: uppercase; color: #007aff; }
   .cal .meta { margin: .35rem 0 0; color: #6e6e73; }
   .cal.team { box-shadow: inset 3px 0 0 #ff9f0a, 0 10px 28px rgba(40,55,90,.08); }
-  .cal.team .kicker { color: #c93400; }
   .cal a, .cal button.retry {
     display: inline-flex; margin-top: .75rem; margin-right: .5rem; min-height: 2.25rem; align-items: center;
     border-radius: 999px; background: #1d1d1f; color: #fff; padding: 0 .85rem; text-decoration: none; font-weight: 500;
@@ -696,6 +695,12 @@
     var wd = names[new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]))).getUTCDay()];
     return wd + " " + Number(p[2]);
   }
+  function teamSwatch(team, later, color) {
+    if (later || !team) return "";
+    var value = String(color || "").trim();
+    if (/^#[0-9a-fA-F]{3}$/.test(value) || /^#[0-9a-fA-F]{6}$/.test(value)) return value;
+    return "#4f8a5b";
+  }
   function nextThree(events, nowMs, todayYmd) {
     var list = [];
     for (var i = 0; i < events.length; i++) {
@@ -747,7 +752,7 @@
     var picked = nextThree(events().map(function (ev) {
       var copy = {
         title: ev.title, allDay: !!ev.allDay, start: ev.start, end: ev.end,
-        startDate: ev.startDate, endDate: ev.endDate, calendar: ev.calendar, team: !!ev.team
+        startDate: ev.startDate, endDate: ev.endDate, calendar: ev.calendar, team: !!ev.team, color: ev.color
       };
       if (!copy.allDay && ev.start) copy.day = clockOf(new Date(ev.start)).ymd;
       return copy;
@@ -766,8 +771,9 @@
       }
       seenDay = item.day;
       var later = item.day !== c.clock.ymd;
-      var who = ev.calendar ? '<p class="meta who">' + esc(ev.calendar) + "</p>" : "";
-      rows += '<div class="slot' + (later ? " later" : "") + (!later && ev.team ? " team" : "") + '"><h2>' + esc(ev.title) + '</h2><p class="meta">' + esc(formatWhen(ev)) + "</p>" + who + "</div>";
+      var swatch = teamSwatch(ev.team, later, ev.color);
+      var who = ev.calendar ? '<p class="meta who"' + (swatch ? ' style="color:' + swatch + '"' : "") + ">" + esc(ev.calendar) + "</p>" : "";
+      rows += '<div class="slot' + (later ? " later" : "") + '"><h2>' + esc(ev.title) + '</h2><p class="meta">' + esc(formatWhen(ev)) + "</p>" + who + "</div>";
     }
     return '<aside class="cal glass"><p class="kicker">Up next on calendar</p>' + rows + note + actions + "</aside>";
   }

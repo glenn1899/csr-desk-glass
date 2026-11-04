@@ -1,4 +1,4 @@
-import { fetchGoogleEvents } from "./google.js";
+import { calendarColor, fetchGoogleEvents } from "./google.js";
 import { readRefreshToken } from "./oauth.js";
 import { SAMPLE_NOTICE, sampleEvents } from "./sample.js";
 import { TORONTO, formatInTimeZone, torontoWindow } from "./time.js";
@@ -141,6 +141,7 @@ export async function withIds(events) {
       location: event.location || "",
       calendar: event.calendar || "",
       team: !!event.team,
+      color: calendarColor(event.color),
     });
   }
   return out;
